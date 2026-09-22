@@ -296,14 +296,21 @@ if(WIN32)
                 $<TARGET_FILE_DIR:${PROJECT_NAME}>
         COMMENT "Copying QWindowKit runtime libraries next to the executable...")
 
-    # FFmpeg 解码库与可执行文件同目录部署
-    if(EXISTS "${QUEMUSIC_FFMPEG_ROOT}/bin")
-        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                    "${QUEMUSIC_FFMPEG_ROOT}/bin"
-                    $<TARGET_FILE_DIR:${PROJECT_NAME}>
-            COMMENT "Copying FFmpeg runtime libraries next to the executable...")
+    # FFmpeg 解码库与可执行文件同目录部署。
+    # 注意：这批 DLL 必须由项目自带。Qt 的 qt_deploy_runtime 只在 multimedia 的
+    # ffmpegmediaplugin 存在时才把 avcodec-61/avformat-61/... 一起部署；该插件已删除
+    # （引擎自行解码，全项目无 MediaPlayer），实测移开本目录后部署结果里没有任何解码库。
+    # 因此这里缺目录直接报错，不允许静默跳过（否则应用能启动但无法播放）。
+    if(NOT EXISTS "${QUEMUSIC_FFMPEG_ROOT}/bin")
+        message(FATAL_ERROR
+            "缺少 ${QUEMUSIC_FFMPEG_ROOT}/bin（FFmpeg 运行库）。"
+            "解码层直接链接 avcodec/avformat，Qt 部署不再提供它们，须由项目自带。")
     endif()
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${QUEMUSIC_FFMPEG_ROOT}/bin"
+                $<TARGET_FILE_DIR:${PROJECT_NAME}>
+        COMMENT "Copying FFmpeg runtime libraries next to the executable...")
 endif()
 
 # macOS 上由 macdeployqt 统一部署；Debug 构建不部署 Qt 运行时
@@ -312,7 +319,16 @@ if(NOT APPLE AND NOT CMAKE_BUILD_TYPE MATCHES "^[Dd]ebug$")
 
     # 解码层用的就是 Qt 自带的 FFmpeg 7.1.3（avcodec-61 等，见 cmake/external/ffmpeg.cmake），
     # 与 multimedia 的 ffmpegmediaplugin 依赖同一批 DLL，两者都保留、不重复部署。
-endif()
+    # 引擎自带 FFmpeg 解码 + QAudioSink 输出，不再经过 Qt 的 MediaPlayer 后端：
+    # ffmpegmediaplugin 已无 QML 使用（全项目无 MediaPlayer 声明），其唯一依赖 swscale 也仅被它引用。
+    # 实测移走这两个文件后 14/14 测试通过、应用正常启动，故部署后删除。
+    # avcodec-61 / avformat-61 / avutil-59 / swresample-5 由解码层使用，必须保留。
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E rm -f
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/multimedia/ffmpegmediaplugin.dll"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/swscale-8.dll"
+        COMMENT "Removing unused Qt Multimedia FFmpeg backend (saves ~1.7MB)...")
+    endif()
 
 enable_testing()
 find_package(Qt6 REQUIRED COMPONENTS Test)

@@ -128,8 +128,8 @@ Rectangle {
                 border.color: Style.themes.themeColor
                 border.width: 2.5
                 ToolTip {
-                    //parent: progressSlider.handle
                     //visible: progressSlider.hovered || progressSlider.pressed
+                    visible: parent.visible
                     text: musicControlMin.mediaTime
                     horizontalPadding: 8
                     background: Rectangle {

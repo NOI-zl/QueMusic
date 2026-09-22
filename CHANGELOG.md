@@ -10,9 +10,12 @@
 ### ⚡ 优化
 - **音频回调内零分配**：`applyPendingParams()` 原在参数变化时构造 `QList<qreal>`（拖 EQ 滑块即每次回调都分配
   内存）。新增 `AudioDsp::setEqGains(const double *, int)` 直读快照数组，音频线程不再触碰容器分配
-- **部署体积 −19MB**：引擎只用 `QAudioSink` 输出、解码走自带 FFmpeg，Qt 的 `multimedia/ffmpegmediaplugin.dll`
-  及其依赖的 61 系 FFmpeg 库（`avcodec-61`/`avformat-61`/`avutil-59`）永不被加载，已在 CMake 部署后自动删除
-  （实测移走后音频测试 13 项全过、0 跳过）；`windowsmediaplugin`（音频设备后端）保留
+- **部署精简（−113MB）**：解码层改用 Qt 自带的 FFmpeg 7.1.3（`avcodec-61`/`avformat-61`/`avutil-59`/
+  `swresample-5`，合计约 19MB），替代原先 8.x 全量包的 111MB；这四个库由解码层直接链接，**必须随应用保留**
+- **删除未被使用的 `multimedia/ffmpegmediaplugin.dll` + `swscale-8.dll`**（约 1.7MB）：全项目已无
+  `MediaPlayer` 声明，实测移走后 14 项音频测试全过、应用正常启动；`windowsmediaplugin` 保留。
+  **注意**：Qt 的 `qt_deploy_runtime` 只在上述插件存在时才顺带部署 `avcodec-61` 等库，插件删除后这批
+  DLL 只能由项目自带，故 `ffmpeg/bin` 缺失时 CMake 直接 `FATAL_ERROR`（原先静默跳过，会导致能启动但无法播放）
 
 ### 🐞 修复
 - **切歌闪退（0xC0000005 @ `Qt6Core!QMetaObject::indexOfProperty`）【根因已定位并修复】**：崩溃是按名字

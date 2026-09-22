@@ -119,6 +119,7 @@ Popup {
                     MouseArea {
                         id: modeArea
                         anchors.fill: parent
+                        hoverEnabled: true
                         onClicked: {
                             desktopPlayer.changeDesktopPlayerMode(index);
                         }
