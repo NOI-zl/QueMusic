@@ -98,6 +98,12 @@ public:
     // 资源管理器式搜索：分块遍历已扫描条目，命中行流式追加进 searchResults
     Q_INVOKABLE void startSearch(const QString &text);
     Q_INVOKABLE void clearSearch();
+
+    // 重新扫描当前目录（刷新按钮用）。直接复用 startScan()，
+    // 避免 QML 侧用 folder="" → folder=原值 去"骗"一次重扫：
+    // 那会让 setFolder("") 真的触发 clearEntries() 把列表先清空一次，
+    // 紧接着再扫一遍，等于连续两次模型重置。
+    Q_INVOKABLE void rescan();
     bool searchActive() const { return m_searchActive; }
     QAbstractListModel *searchResults() const { return m_searchResults; }
 

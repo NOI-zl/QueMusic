@@ -1,10 +1,8 @@
-// QWideDrop.qml
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-2026 QueMusic Contributors
 //
 import QtQuick
 import QueMusic 1.0
-import QtQuick.Layouts
 
 Item {
     id: root
@@ -19,7 +17,6 @@ Item {
         y: 0
         width: root.width - 16
         height: root.height
-        property int choiceIndex: 0
         spacing: 16
         Repeater {
             model: root.model

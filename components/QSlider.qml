@@ -38,12 +38,12 @@ Slider {
     handle: Rectangle {
         x: slider.leftPadding + slider.visualPosition * (slider.availableWidth - width)
         y: slider.topPadding + slider.availableHeight / 2 - height / 2
-        implicitWidth: slider.pressed ? 20 : 15
-        implicitHeight: slider.pressed ? 20 : 15
+        implicitWidth: 15
+        implicitHeight: 15
+        scale: slider.pressed ? 1.3 : 1
         radius: width / 2
         color: "#ffffff"
-        Behavior on implicitWidth { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-        Behavior on implicitHeight { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+        Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
 
         RectangularShadow {
             anchors.fill: parent

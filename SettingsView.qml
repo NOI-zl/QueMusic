@@ -4,7 +4,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Dialogs
-import QtQuick.Window
 import QtCore
 import QueMusic 1.0
 
@@ -455,8 +454,8 @@ Item {
             id: navModelSettings
             ListElement { display: "通用"; iconChar: "\uf038" }
             ListElement { display: "界面"; iconChar: "\uf0a7" }
-            ListElement { display: "功能"; iconChar: "\uf094" }
-            ListElement { display: "播放"; iconChar: "\uf010" }
+            ListElement { display: "播放器"; iconChar: "\uf010" }
+            ListElement { display: "音频"; iconChar: "\uf044" }
             ListElement { display: "快捷键"; iconChar: "\uf0c7" }
             ListElement { display: "插件"; iconChar: "\uf0ff" }
             ListElement { display: "关于"; iconChar: "\uf0b6" }
@@ -799,11 +798,13 @@ Item {
                             }
                         }
 
-                        Row {
+                        Grid {
                             x: 16
                             width: parent.width - 32
-                            height: 144
-                            spacing: 14
+                            height: 270
+                            columns: 3
+                            columnSpacing: 14
+                            rowSpacing: 14
                             PlatformCard {
                                 text: "酷狗音乐"
                                 chooseColor: "#4384F5"
@@ -855,19 +856,30 @@ Item {
                                 }
                             }
                             PlatformCard {
+                                text: "哔哩哔哩"
+                                chooseColor: "#FB7299"
+                                chooseColor1: Style.darkis ? "#5C2338" : "#FFD9E6"
+                                width: settingStack.standWidth / 3 - 20
+                                height: 128
+                                choose: MusicApi.songSource === 2
+                                showLogin: false
+                                idleText: "无需登录"
+                                onClicked: MusicApi.songSource = 2;
+                            }
+                            /*PlatformCard {
                                 text: "QQ音乐"
                                 chooseColor: "#3AD630"
                                 chooseColor1: Style.darkis ? "#195319" : "#CDFFCD"
                                 width: settingStack.standWidth / 3 - 20
                                 height: 128
-                                choose: MusicApi.songSource === 2
+                                choose: MusicApi.songSource === 3
                                 isLogin: false
                                 name: "暂不支持"
-                                onClicked: MusicApi.songSource = 2;
+                                onClicked: MusicApi.songSource = 3;
                                 onLogined: {
                                     mainWarn.tiped("目前无法使用", 0);
                                 }
-                            }
+                            }*/
                         }
                     }
                 }
@@ -943,6 +955,32 @@ Item {
                                 letRight: true
                                 switchTrue: Options.settings.autoUpdate
                                 onToggled: Options.settings.autoUpdate = !Options.settings.autoUpdate
+                            }
+                        }
+
+                        SettingItemCard {
+                            label: "默认缓存位置"
+                            tip: "设置封面等图片缓存文件的存放目录"
+                            controlItem: QButton {
+                                anchors.fill: parent
+                                shadowEnabled: false
+                                radius: Style.settings.labelRadius
+                                borderWidth: 2
+                                text: Options.settings.cacheUrl ? "自定义目录" : "系统默认"
+                                fontSize: Style.settings.text
+                                onClicked: cacheFolderDialog.open()
+                            }
+                            FolderDialog {
+                                id: cacheFolderDialog
+                                title: "选择缓存目录"
+                                onAccepted: {
+                                    let p = cacheFolderDialog.selectedFolder.toString();
+                                    if (p.indexOf("file:///") === 0)
+                                        p = p.substring(8);
+                                    Options.settings.cacheUrl = p;
+                                    coverHelper.setCacheDir(p);
+                                    mainWarn.tiped("已设置封面缓存目录", 1);
+                                }
                             }
                         }
 
@@ -1341,7 +1379,7 @@ Item {
             }
         }
 
-        // 功能设置
+        // 播放器设置
         QScrollView {
             id: toolset
             width: settingStack.width
@@ -1361,13 +1399,13 @@ Item {
                     height: 40
                     color: Style.themes.fontColor
                     verticalAlignment: Text.AlignVCenter
-                    text: "功能"
+                    text: "播放器"
                     font.pixelSize: Style.settings.pageTitle
                     font.weight: Font.DemiBold
                     font.letterSpacing: -0.3
                 }
 
-                QHead { text: "通用" }
+                QHead { text: "在线功能" }
 
                 Rectangle {
                     width: settingStack.standWidth
@@ -1377,41 +1415,6 @@ Item {
                         width: parent.width
                         padding: 0
                         Component.onCompleted: parent.height = height
-
-                        SettingItemCard {
-                            label: "默认缓存位置"
-                            tip: "设置封面等图片缓存文件的存放目录"
-                            controlItem: QButton {
-                                anchors.fill: parent
-                                shadowEnabled: false
-                                radius: Style.settings.labelRadius
-                                borderWidth: 2
-                                text: Options.settings.cacheUrl ? "自定义目录" : "系统默认"
-                                fontSize: Style.settings.text
-                                onClicked: cacheFolderDialog.open()
-                            }
-                            FolderDialog {
-                                id: cacheFolderDialog
-                                title: "选择缓存目录"
-                                onAccepted: {
-                                    let p = cacheFolderDialog.selectedFolder.toString();
-                                    if (p.indexOf("file:///") === 0)
-                                        p = p.substring(8);
-                                    Options.settings.cacheUrl = p;
-                                    coverHelper.setCacheDir(p);
-                                    mainWarn.tiped("已设置封面缓存目录", 1);
-                                }
-                            }
-                        }
-
-                        SettingItemCard {
-                            label: "默认数据存储位置"
-                            tip: "(暂未开放)设置数据库等本地数据的存放目录"
-                            controlItem: QInput {
-                                anchors.fill: parent
-                                inputText: "选择目录"
-                            }
-                        }
 
                         SettingItemCard {
                             label: "默认音质"
@@ -1427,54 +1430,14 @@ Item {
                         }
 
                         SettingItemCard {
-                            label: "音频Data偏好"
-                            tip: "设置读取歌曲元数据的来源偏好"
-                            controlItem: QDrop {
-                                anchors.fill: parent
-                                choice: Options.settings.metaDataSource
-                                model: ["标准","高清","超清"]
-                                onTransformed: (choiced) => {
-                                    Options.settings.metaDataSource = choiced
-                                }
-                            }
-                            bottomLine: false
-                        }
-                    }
-                }
-
-                QHead { text: "在线服务" }
-
-                Rectangle {
-                    width: settingStack.standWidth
-                    color: Style.themes.primaryColor
-                    radius: Style.settings.cubeRadius
-                    Column {
-                        width: parent.width
-                        padding: 0
-                        Component.onCompleted: parent.height = height
-
-                        SettingItemCard {
                             label: "默认音乐源"
                             tip: "设置在线音乐默认使用的音源平台"
                             controlItem: QDrop {
                                 anchors.fill: parent
                                 choice: Options.settings.mainMusicSource
-                                model: ["酷狗音乐","网易云音乐","QQ音乐"]
+                                model: ["酷狗音乐","网易云音乐","哔哩哔哩","QQ音乐"]
                                 onTransformed: (choiced) => {
                                     Options.settings.mainMusicSource = choiced
-                                }
-                            }
-                        }
-
-                        SettingItemCard {
-                            label: "代理服务器"
-                            tip: "(暂未开放)设置网络请求使用的代理服务器"
-                            controlItem: QDrop {
-                                anchors.fill: parent
-                                choice: Options.settings.serverAgency
-                                model: ["默认","系统http协议","自带协议","自定义"]
-                                onTransformed: (choiced) => {
-                                    Options.settings.serverAgency = choiced
                                 }
                             }
                         }
@@ -1499,36 +1462,8 @@ Item {
                         }
                     }
                 }
-            }
-        }
 
-        // 播放设置
-        QScrollView {
-            id: playerset
-            width: settingStack.width
-            height: settingStack.height - 60
-
-            visible: false
-
-            Column {
-                id: playContent
-                spacing: 16
-                padding: 24
-                width: settingStack.containWidth
-                x: settingStack.containX
-
-                Text {
-                    width: settingStack.standWidth
-                    height: 40
-                    color: Style.themes.fontColor
-                    verticalAlignment: Text.AlignVCenter
-                    text: "播放"
-                    font.pixelSize: Style.settings.pageTitle
-                    font.weight: Font.DemiBold
-                    font.letterSpacing: -0.3
-                }
-
-                QHead { text: "播放器" }
+                QHead { text: "通用" }
 
                 Rectangle {
                     width: settingStack.standWidth
@@ -1563,23 +1498,6 @@ Item {
                                 model: musicDevices.audioOutputs
                                 onTransformed: (choiced) => {
                                     Options.settings.audioDevice = choiced
-                                }
-                            }
-                        }
-
-                        SettingItemCard {
-                            label: "自动缓冲大小"
-                            tip: "(暂不可用)设置音频解码缓冲区的大小"
-                            controlItem: QSlider {
-                                anchors.fill: parent
-                                from: 100
-                                to: 1000
-                                stepSize: 20
-                                valueText: value
-                                leftText: true
-                                value: Options.settings.bufferSize
-                                onMoved: {
-                                    Options.settings.bufferSize = value
                                 }
                             }
                         }
@@ -1748,6 +1666,39 @@ Item {
                             bottomLine: false
                         }
                     }
+                }
+            }
+        }
+
+        // 音频设置
+        QScrollView {
+            id: playerset
+            width: settingStack.width
+            height: settingStack.height - 60
+
+            visible: false
+
+            Column {
+                id: playContent
+                spacing: 16
+                padding: 24
+                width: settingStack.containWidth
+                x: settingStack.containX
+
+                Text {
+                    width: settingStack.standWidth
+                    height: 40
+                    color: Style.themes.fontColor
+                    verticalAlignment: Text.AlignVCenter
+                    text: "播放"
+                    font.pixelSize: Style.settings.pageTitle
+                    font.weight: Font.DemiBold
+                    font.letterSpacing: -0.3
+                }
+
+                EqualizerPanel {
+                    width: settingStack.standWidth
+                    engine: mainMedia
                 }
             }
         }
@@ -2565,7 +2516,7 @@ Item {
                     }
                 }
 
-                QHead { text: "使用的主要第三方项目" }
+                QHead { text: "主要使用的第三方项目" }
 
                 Grid {
                     spacing: 24
@@ -2583,11 +2534,6 @@ Item {
                         title: "Qt Community"
                         text: "强大的开源软件包框架"
                         openUrl: "https://github.com/qt"
-                    }
-                    AccountCard {
-                        source: ""
-                        title: "Poppins ，Feather"
-                        text: "Font库，提供字体与图标的库"
                     }
                     AccountCard {
                         source: ""

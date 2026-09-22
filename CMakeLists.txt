@@ -117,6 +117,8 @@ set(QUE_MUSIC_QML_FILES
     layout/PlayerControl.qml
     layout/PlayerMaxCenter.qml
     layout/LeftSideBar.qml
+    layout/WindowControls.qml
+    layout/SmtcBridge.qml
     pages/HomePage.qml
     pages/PlaylistPage.qml
     pages/FavouritePage.qml
@@ -209,6 +211,18 @@ qt6_add_qml_module(${PROJECT_NAME} # 默认导入项目的
         cpp/LogManager.h
         cpp/SystemTrayManager.cpp
         cpp/SystemTrayManager.h
+        cpp/audio/AudioEngine.cpp
+        cpp/audio/AudioEngine.h
+        cpp/audio/AudioDsp.cpp
+        cpp/audio/AudioDsp.h
+        cpp/audio/AudioRing.h
+        cpp/audio/AudioSpectrumSink.h
+        cpp/audio/FfmpegDecoder.cpp
+        cpp/audio/FfmpegDecoder.h
+        cpp/audio/PitchShifter.cpp
+        cpp/audio/PitchShifter.h
+        cpp/audio/TimeStretch.cpp
+        cpp/audio/TimeStretch.h
         api/MusicApiService.cpp
         api/MusicApiService.h
         api/OnlineListModel.cpp
@@ -217,6 +231,8 @@ qt6_add_qml_module(${PROJECT_NAME} # 默认导入项目的
         api/NeteaseCloudApi.h
         api/KugouApi.cpp
         api/KugouApi.h
+        api/BilibiliApi.cpp
+        api/BilibiliApi.h
         api/ApiCommon.h
 )
 
@@ -260,8 +276,9 @@ target_link_libraries(${PROJECT_NAME}
         Qt6::Widgets
         QCloudMusicApi
         quemusic::taglib
-        cryptopp::cryptopp
         quemusic::zlib
+        quemusic::ffmpeg
+        cryptopp::cryptopp
     PUBLIC
         QWindowKit::Quick
 )
@@ -278,11 +295,23 @@ if(WIN32)
                 $<TARGET_FILE:QWindowKit::Quick>
                 $<TARGET_FILE_DIR:${PROJECT_NAME}>
         COMMENT "Copying QWindowKit runtime libraries next to the executable...")
+
+    # FFmpeg 解码库与可执行文件同目录部署
+    if(EXISTS "${QUEMUSIC_FFMPEG_ROOT}/bin")
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${QUEMUSIC_FFMPEG_ROOT}/bin"
+                    $<TARGET_FILE_DIR:${PROJECT_NAME}>
+            COMMENT "Copying FFmpeg runtime libraries next to the executable...")
+    endif()
 endif()
 
 # macOS 上由 macdeployqt 统一部署；Debug 构建不部署 Qt 运行时
 if(NOT APPLE AND NOT CMAKE_BUILD_TYPE MATCHES "^[Dd]ebug$")
     qt_deploy_runtime(${PROJECT_NAME})
+
+    # 解码层用的就是 Qt 自带的 FFmpeg 7.1.3（avcodec-61 等，见 cmake/external/ffmpeg.cmake），
+    # 与 multimedia 的 ffmpegmediaplugin 依赖同一批 DLL，两者都保留、不重复部署。
 endif()
 
 enable_testing()
@@ -300,3 +329,23 @@ target_link_libraries(quemusic_local_lyrics_test PRIVATE
     quemusic::taglib
 )
 add_test(NAME quemusic_local_lyrics_test COMMAND quemusic_local_lyrics_test)
+
+add_executable(quemusic_audio_pipeline_test
+    tests/audio_pipeline_test.cpp
+    cpp/audio/AudioEngine.cpp
+    cpp/audio/AudioDsp.cpp
+    cpp/audio/FfmpegDecoder.cpp
+    cpp/audio/PitchShifter.cpp
+    cpp/audio/TimeStretch.cpp
+)
+target_include_directories(quemusic_audio_pipeline_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpp
+)
+target_link_libraries(quemusic_audio_pipeline_test PRIVATE
+    Qt6::Core
+    Qt6::Test
+    Qt6::Qml
+    Qt6::Multimedia
+    quemusic::ffmpeg
+)
+add_test(NAME quemusic_audio_pipeline_test COMMAND quemusic_audio_pipeline_test)

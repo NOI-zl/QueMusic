@@ -10,6 +10,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QHashFunctions>
 #include <QMultiMap>
 #include <QCryptographicHash>
@@ -134,7 +135,6 @@ QString CoverHelper::findLocalCover(const QString &sourcePath)
     if (!fi.isFile())
         return QString();
 
-    QString found;
     const QDir dir = fi.absoluteDir();
     const QStringList entries = dir.entryList(QDir::Files);
 
@@ -145,23 +145,20 @@ QString CoverHelper::findLocalCover(const QString &sourcePath)
                                      QStringLiteral("png"), QStringLiteral("webp"),
                                      QStringLiteral("bmp"), QStringLiteral("gif") };
 
+    QHash<QString, QString> byLowerName;
+    byLowerName.reserve(entries.size());
+    for (const QString &entry : entries)
+        byLowerName.insert(entry.toLower(), entry);
+
     for (const QString &name : names) {
         for (const QString &ext : extensions) {
-            const QString target = name + QLatin1Char('.') + ext;
-            for (const QString &entry : entries) {
-                if (entry.compare(target, Qt::CaseInsensitive) == 0) {
-                    found = QUrl::fromLocalFile(dir.filePath(entry)).toString();
-                    break;
-                }
-            }
-            if (!found.isEmpty())
-                break;
+            const auto it = byLowerName.constFind((name + QLatin1Char('.') + ext).toLower());
+            if (it != byLowerName.constEnd())
+                return QUrl::fromLocalFile(dir.filePath(it.value())).toString();
         }
-        if (!found.isEmpty())
-            break;
     }
 
-    return found;
+    return QString();
 }
 
 QString CoverHelper::readCoverFromTag(const QString &sourcePath, const QString &cacheDir,

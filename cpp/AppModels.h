@@ -3,23 +3,14 @@
 //
 // 面向 QML 的数据模型单例。
 //
-// 背景：这些模型原先通过 QQmlContext::setContextProperty() 以裸名字（songModel、
-// favoritesSong…）暴露给 QML。上下文属性无法被 qmlcachegen 在编译期解析，相关绑定只能
-// 退回解释执行。改造成 QML 单例后 QML 侧按类型名访问（如 FavoriteSongs.count）。
+// 这些模型原先用 QQmlContext::setContextProperty() 暴露，上下文属性无法被 qmlcachegen 在
+// 编译期解析，绑定只能退回解释执行；拆成独立单例后 QML 按类型名访问（如 FavoriteSongs.count）
+// 才能编译成 C++。不能改成"一个单例持有多个模型属性"：qmlcachegen 会拒绝继续属性查找。
 //
-// 为什么必须拆成一个个独立的单例类型，而不是"一个单例持有多个模型属性"：
-// 实测（Qt 6.10.3）qmlcachegen 对"经由对象属性拿到的对象"一律拒绝继续做属性查找：
-//     Cannot use shadowable base type for further lookups: Xxx::yyy with type ...
-// 只有直接按类型名访问的单例（与工程里 MusicApi 的用法一致）才能把 xxx.count /
-// xxx.loading / xxx.isFavorite(...) 这类访问编译成 C++。
-//
-// ⚠️ 构造函数【绝不能】带默认参数（LANGUAGE 级坑，务必保留注释）：
-// Qt 的 qqmlprivate.h 中 singletonConstructionMode() 的判定顺序是
-//     FactoryWrapper  ->  is_default_constructible  ->  HasSingletonFactory
-// 即"可默认构造"优先于 create()。若构造函数写成 X(QObject *parent = nullptr)，
-// 引擎会走默认构造分支（new T），下面的 create() 永远不会被调用 —— 过滤类型也就永远
-// 不会被设置，表现为各个收藏列表（歌曲/歌单/歌手）都把全部数据列出来。
-// 显式去掉默认参数即可强制引擎走 create() 分支。
+// ⚠️ 构造函数【绝不能】带默认参数（务必保留注释）：qqmlprivate.h 的
+// singletonConstructionMode() 中 is_default_constructible 优先于 HasSingletonFactory，
+// 写成 X(QObject *parent = nullptr) 会走默认构造分支、create() 永不执行，过滤类型不会设置，
+// 表现为各收藏列表把全部数据列出来。显式去掉默认参数即可强制走 create() 分支。
 #ifndef APPMODELS_H
 #define APPMODELS_H
 

@@ -1,9 +1,12 @@
 [submodule "ThirdParty/qwindowkit"]
 	path = ThirdParty/qwindowkit
 	url = https://github.com/stdware/qwindowkit
+	shallow = true
 [submodule "api/QCloudMusicApi/3rdparty/cryptopp"]
 	path = api/QCloudMusicApi/3rdparty/cryptopp
 	url = https://github.com/weidai11/cryptopp.git
+	shallow = true
 [submodule "ThirdParty/taglib"]
 	path = ThirdParty/taglib
 	url = https://github.com/taglib/taglib.git
+	shallow = true

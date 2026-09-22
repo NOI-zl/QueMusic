@@ -27,6 +27,7 @@
 namespace {
 constexpr int kSourceKugou = 0;
 constexpr int kSourceNetease = 1;
+constexpr int kSourceBilibili = 2;
 
 // 取多个候选字段中第一个非空字符串（模拟 JS 的 a || b || c || ""）
 QString firstNonEmpty(const QVariantMap &m, std::initializer_list<const char *> keys)
@@ -68,6 +69,7 @@ MusicApiService::MusicApiService(QObject *parent)
     // 平台结果直接在本类处理（填模型 / 属性 / 发信号）
     connect(&m_netease, &NeteaseCloudApi::resultReady, this, &MusicApiService::handleResult);
     connect(&m_kugou, &KugouApi::resultReady, this, &MusicApiService::handleResult);
+    connect(&m_bilibili, &BilibiliApi::resultReady, this, &MusicApiService::handleResult);
 
     // 音质初值：QML 侧还有 Binding 同步，这里读 ini 只为保证 Binding 生效前也正确
     QSettings opt(QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
@@ -224,8 +226,13 @@ QString MusicApiService::resolveQualityHash(const QString &hash) const
     return base;
 }
 
-void MusicApiService::syncCookie(int source)
+void MusicApiService::syncSource(int source)
 {
+    // B 站无需登录：只同步音质（决定取哪条 DASH 音频流）
+    if (source == kSourceBilibili) {
+        m_bilibili.setQuality(m_soundQuality);
+        return;
+    }
     if (!m_account)
         return;
     if (source == kSourceNetease)
@@ -241,10 +248,11 @@ void MusicApiService::syncCookie(int source)
 #define DISPATCH(source, expr)                                              \
     do {                                                                    \
         const int quemusicSource = resolve(source);                         \
-        syncCookie(quemusicSource);                                         \
+        syncSource(quemusicSource);                                         \
         switch (quemusicSource) {                                           \
-        case kSourceNetease: m_netease.expr; break;                         \
-        case kSourceKugou:   m_kugou.expr; break;                           \
+        case kSourceNetease:  m_netease.expr; break;                        \
+        case kSourceKugou:    m_kugou.expr; break;                          \
+        case kSourceBilibili: m_bilibili.expr; break;                       \
         default:                                                            \
             qWarning() << "[api] 未实现的平台:" << quemusicSource;            \
         }                                                                   \
@@ -320,9 +328,9 @@ void MusicApiService::getAllToplists()
 {
     m_toplistList.clear();
     setLoadState(true);
-    syncCookie(kSourceKugou);
+    syncSource(kSourceKugou);
     m_kugou.getAllToplist();
-    syncCookie(kSourceNetease);
+    syncSource(kSourceNetease);
     m_netease.getAllToplist();
 }
 
@@ -460,6 +468,25 @@ void MusicApiService::findLocalLyrics(const QString &filePath, const QString &ti
         ? request.title
         : request.title + QLatin1Char(' ') + request.artist;
     searchSongs(keyword, 0, 1, 10, resolvedSource);
+}
+
+// B 站稿件没有字幕：复用「本地歌曲在线搜词」的同一条链路，
+// 按标题/歌手在回退平台（默认酷狗）搜歌，命中后取该平台歌词覆盖占位歌词。
+void MusicApiService::findOnlineLyrics(const QString &title, const QString &artist,
+                                       int duration, int source)
+{
+    const QString cleanTitle = title.trimmed();
+    if (cleanTitle.isEmpty())
+        return;
+    LocalLyricsRequest request;
+    request.title = cleanTitle;
+    request.artist = artist.trimmed();
+    request.duration = duration;
+    m_biliFallbackSearches.insert(source, request);
+    const QString keyword = request.artist.isEmpty()
+        ? request.title
+        : request.title + QLatin1Char(' ') + request.artist;
+    searchSongs(keyword, 0, 1, 10, source);
 }
 
 // 读取本地音频同目录同名 .json 元数据；不存在时回退读取音频内嵌 TAG 元数据
@@ -694,8 +721,12 @@ void MusicApiService::handleResult(const QString &action, const QVariant &data, 
         rememberHashes(info.toList());
 
     if (action == QLatin1String("searchSongs")) {
-        if (m_localLyricsSearches.contains(source)) {
-            const LocalLyricsRequest request = m_localLyricsSearches.take(source);
+        const bool localLookup = m_localLyricsSearches.contains(source);
+        const bool onlineLookup = m_biliFallbackSearches.contains(source);
+        if (localLookup || onlineLookup) {
+            const LocalLyricsRequest request = localLookup
+                ? m_localLyricsSearches.take(source)
+                : m_biliFallbackSearches.take(source);
             const QVariantList songs = normalizeList(info);
             QVariantMap best;
             int bestScore = -1;
@@ -723,9 +754,12 @@ void MusicApiService::handleResult(const QString &action, const QVariant &data, 
 
             const QString hash = best.value(QStringLiteral("hash")).toString();
             if (hash.isEmpty()) {
-                emit localLyricsFailed(request.filePath);
-            } else {
+                if (localLookup)
+                    emit localLyricsFailed(request.filePath);
+            } else if (localLookup) {
                 m_pendingLocalLyrics.insert(hash, request);
+                getLyricInfo(hash, request.duration, source);
+            } else { // 回退歌词：直接走该平台歌词接口，结果覆盖占位歌词
                 getLyricInfo(hash, request.duration, source);
             }
         } else {
@@ -819,7 +853,14 @@ void MusicApiService::handleResult(const QString &action, const QVariant &data, 
     } else if (action == QLatin1String("getMusicInfo")) {
         handleMusicInfo(d, source);
     } else if (action == QLatin1String("getLyricInfo")) {
+        const QString lyricHash = d.value(QStringLiteral("hash")).toString();
         QVariantList onlineLyrics = d.value(QStringLiteral("info")).toList();
+        // B 站稿件没有字幕：复用在线搜词链路补词（结果回来后覆盖下面的占位歌词）
+        const bool biliNoSubtitle = source == kSourceBilibili && !lyricHash.isEmpty()
+                                    && lyricHash == m_biliTrack.hash;
+        if (biliNoSubtitle && onlineLyrics.isEmpty())
+            findOnlineLyrics(m_biliTrack.title, m_biliTrack.artist, m_biliTrack.duration);
+
         if (onlineLyrics.isEmpty()) { // 纯音乐/无歌词占位
             QVariantMap line;
             line.insert(QStringLiteral("time"), 0);
@@ -829,7 +870,6 @@ void MusicApiService::handleResult(const QString &action, const QVariant &data, 
         setLyricsData(onlineLyrics);
         setLyricsTranslate(d.value(QStringLiteral("translate")));
 
-        const QString lyricHash = d.value(QStringLiteral("hash")).toString();
         if (!lyricHash.isEmpty() && m_pendingLocalLyrics.contains(lyricHash)) {
             const LocalLyricsRequest request = m_pendingLocalLyrics.take(lyricHash);
             const QVariantList lyrics = d.value(QStringLiteral("info")).toList();
@@ -879,6 +919,13 @@ void MusicApiService::handleMusicInfo(const QVariantMap &d, int source)
         qDebug() << "[api] 无法播放:" << msg << "hash:" << playHash.left(8);
         emit warned(msg, 2);
         return;
+    }
+    // B 站稿件没有字幕时，要靠标题/歌手去其他平台搜词
+    if (source == kSourceBilibili) {
+        m_biliTrack.hash = playHash;
+        m_biliTrack.title = d.value(QStringLiteral("songName")).toString();
+        m_biliTrack.artist = d.value(QStringLiteral("author_name")).toString();
+        m_biliTrack.duration = int(d.value(QStringLiteral("timeLength")).toDouble()); // 秒
     }
     if (type == 0) { // 播放
         QString cover = d.value(QStringLiteral("album_img")).toString();

@@ -16,7 +16,29 @@ Popup {
     y: 80
     // 当前桌面部件模式：0.无 1.灵动岛 2.小窗播放器 3.歌词栏
     property int desktopPlayerMode: 0
-    property bool openTool: false
+    function changeDesktopPlayerMode(index: int): void {
+        desktopPlayer.desktopPlayerMode = index;
+        switch(index) {
+            case 0:
+                // 无：全部关闭
+                desktopPlayerLoader.active = false;
+                desktopLyricsLoader.active = false;
+                break;
+            case 1:
+                // 小窗播放器：开启小窗，关闭灵动岛
+                desktopLyricsLoader.active = false;
+                desktopPlayerLoader.active = true;
+                if (desktopPlayerLoader.status === Loader.Ready) {
+                    desktopPlayerLoader.item.show();
+                }
+                break;
+            case 2:
+                // 歌词栏：暂未实现
+                desktopPlayerLoader.active = false;
+                desktopLyricsLoader.active = true;
+                break;
+        }
+    }
 
     background: QBlurCard {
         anchors.fill: parent
@@ -61,56 +83,44 @@ Popup {
             height: parent.height - 60
             spacing: 16
 
-            SettingItem {
-                label: "启用桌面部件"
-                controlWidth: 120
-                width: parent.width
-                QSwitch {
-                    height: 36; width: 120
-                    anchors.right: parent.right
-                    switchTrue: desktopPlayer.openTool
-                    onToggled: {
-                        desktopPlayerLoader.active = false;
-                        desktopLyricsLoader.active = false;
-                        desktopPlayer.openTool = !desktopPlayer.openTool;
-                        desktopPlayer.desktopPlayerMode = 0;
+            Repeater {
+                model: ["无部件","小窗播放器","桌面歌词"]
+                delegate: Rectangle {
+                    width: parent.width
+                    radius: Style.settings.labelRadius
+                    color: desktopPlayer.desktopPlayerMode === index ? Style.themes.themeColor : Style.themes.primaryColor
+                    height: 60
+                    border.width: 2
+                    border.color: Style.themes.sideColor
+                    Rectangle {
+                        radius: parent.radius
+                        anchors.fill: parent
+                        color: Style.themes.hoverColor
+                        opacity: modeArea.containsMouse ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 120 } }
                     }
-                }
-            }
 
-            SettingItem {
-                label: "桌面部件"
-                controlWidth: 120
-                width: parent.width
-                z: 5
-                opacity: desktopPlayer.openTool ? 1.0 : 0.5
-                QDrop {
-                    height: 36; width: 120
-                    anchors.right: parent.right
-                    enabled: desktopPlayer.openTool
-                    choice: desktopPlayer.desktopPlayerMode
-                    model: ["无","小窗播放器","桌面歌词"]
-                    onTransformed: (choiced) => {
-                        desktopPlayer.desktopPlayerMode = choiced;
-                        switch(choiced) {
-                            case 0:
-                                // 无：全部关闭
-                                desktopPlayerLoader.active = false;
-                                desktopLyricsLoader.active = false;
-                                break;
-                            case 1:
-                                // 小窗播放器：开启小窗，关闭灵动岛
-                                desktopLyricsLoader.active = false;
-                                desktopPlayerLoader.active = true;
-                                if (desktopPlayerLoader.status === Loader.Ready) {
-                                    desktopPlayerLoader.item.show();
-                                }
-                                break;
-                            case 2:
-                                // 歌词栏：暂未实现
-                                desktopPlayerLoader.active = false;
-                                desktopLyricsLoader.active = true;
-                                break;
+                    Text {
+                        x: 16
+                        anchors.verticalCenter: parent.verticalCenter
+                        font.pixelSize: Style.settings.textH2
+                        text: modelData
+                        color: desktopPlayer.desktopPlayerMode === index ? Style.themes.secondaryColor : Style.themes.fontColor
+                    }
+                    Text {
+                        x: parent.width - 42
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "\uf099"
+                        font.pixelSize: Style.settings.texticon
+                        font.family: iconFont.name
+                        visible: desktopPlayer.desktopPlayerMode === index
+                        color: Style.themes.secondaryColor
+                    }
+                    MouseArea {
+                        id: modeArea
+                        anchors.fill: parent
+                        onClicked: {
+                            desktopPlayer.changeDesktopPlayerMode(index);
                         }
                     }
                 }
@@ -121,9 +131,10 @@ Popup {
                 controlWidth: 120
                 width: parent.width
                 QSwitch {
+                    text: switchTrue ? "工作中" : "不支持"
                     height: 36; width: 120
                     anchors.right: parent.right
-                    switchTrue: windowsSmtc.available
+                    switchTrue: smtc.mgr.available
                     onToggled: {
                     }
                 }

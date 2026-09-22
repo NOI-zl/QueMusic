@@ -1,16 +1,13 @@
-// QCard.qml
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-2026 QueMusic Contributors
 //
 import QtQuick
 import QueMusic 1.0
-import QtQuick.Layouts
 import QtQuick.Effects
 
 Item {
     id: root
 
-    // === 公共接口与样式 ===
     property bool backgroundVisible: true
 
     property color cardColor: Style.themes.primaryColor

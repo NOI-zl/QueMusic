@@ -8,8 +8,6 @@
 // 窗口 id 为 center：centers/ 内组件用 root 指自己、center 指本窗口
 //
 import QtQuick
-import QtQuick.Effects
-import QtMultimedia
 import QueMusic 1.0
 import 'qrc:/QueMusic/components'
 import 'qrc:/QueMusic/centers'
@@ -69,7 +67,7 @@ Window {
     FontLoader { id: iconFont; source: "qrc:/QueMusic/resources/fonts/feather.ttf" }
 
     // ==== 播放状态 ====
-    readonly property MediaPlayer player: Playback.player
+    readonly property AudioEngine player: Playback.player
     readonly property QueueModel queue: Playback.queue
     readonly property int trackIndex: queue ? queue.playListIndex : -1
     readonly property var track: queue && trackIndex >= 0 && trackIndex < queue.count
@@ -77,7 +75,7 @@ Window {
     readonly property string songTitle: track ? track.name || "" : (player ? player.noTitle || "" : "")
     readonly property string songArtist: track ? track.songer || "" : ""
     readonly property url cover: player && player.urlStr ? player.urlStr : Options.lastSongs.cover
-    readonly property bool hasMedia: player ? player.mediaStatus !== MediaPlayer.NoMedia : false
+    readonly property bool hasMedia: player ? player.mediaStatus !== AudioEngine.NoMedia : false
     readonly property bool playing: player ? player.playing : false
 
     // ==== 封面主色 ====
@@ -123,7 +121,6 @@ Window {
     function playLocal(path: string, name: string): void {
         if (!player || !path)
             return
-        player.urlLocal = true
         player.noTitle = name || path
         player.urlStr = "qrc:/QueMusic/resources/app/musicpic.png"
         MusicApi.setLocalLyrics()
@@ -181,7 +178,7 @@ Window {
         MusicApi.nowIndex = 0
         MusicApi.searchSongs(key, 0, 1, 30)
         pageIndex = 5
-        if (pages.item)
+        if (pages.status === Loader.Ready)
             pages.item.switchTab(0)
     }
 
@@ -235,7 +232,6 @@ Window {
                     color: "#eef1f6"
                 }
                 Rectangle {
-                    x: 150
                     y: 20
                     width: 40
                     height: 20
@@ -268,7 +264,7 @@ Window {
                     height: 36
                     radius: 18
                     choice: MusicApi.songSource
-                    model: ["酷狗音乐", "网易云音乐", "QQ音乐(x)", "自定义源(x)"]
+                    model: ["酷狗音乐", "网易云音乐", "哔哩哔哩", "QQ音乐(x)", "自定义源(x)"]
                     onTransformed: i => MusicApi.songSource = i
                 }
                 CenterWinButtons {

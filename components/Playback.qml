@@ -1,80 +1,161 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-2026 QueMusic Contributors
 //
+// 播放中枢：切歌 / 淡变防爆音 / 音量 / 跳转 / A-B 循环 / 睡眠定时 / 播放历史 / 真随机
 pragma Singleton
 import QtQuick
-import QtMultimedia
 import QueMusic 1.0
 
-// 播放中枢：换源防爆音 / 淡入淡出 / A-B 循环 / 睡眠定时 / 播放历史 / 真随机 / 跳转 / 音量
 QtObject {
     id: root
 
-    property MediaPlayer player: null
-    property QueueModel queue: null
-    signal playIndex(int index)
-    property bool muted: false
+    property AudioEngine player
+    property QueueModel queue
+
+    // 当前曲目的标题/歌手与待读歌词路径：原先散在 main.qml，靠 window.xxx 跨文件来回传
+    property string musicTitle: "QueMusic"
+    property string musicArtist: ""
+    property string localLyricsRequestPath: ""
+    property int pendingSeek: 0
+    property string pendingSeekPath: ""
+    property int autoSkipCount: 0
 
     readonly property int count: queue ? queue.count : 0
-    readonly property real outVolume: muted ? 0 : Options.settings.musicVolume * factor
 
-    // 音量淡变
-    property real factor: 1
-    property bool armed: false          // 已静音，等待新音轨起播后淡回
-    property var nextAction: null       // 静音后要执行的动作
-    property var afterFade: null        // 淡变自然结束后的回调
-    property bool keepSilent: false     // 停止类操作：执行后不淡回
+    property bool muted: false
+    readonly property real outVolume: muted ? 0 : Options.settings.musicVolume
+
+    // 唯一出口：设索引 + 记录播放历史 + 直接起播
+    function goTo(i: int): void {
+        if (i < 0 || i >= count) return
+        queue.playListIndex = i
+        notePlayed(i)
+        startTrack(i)
+    }
+
+    function next(random: bool): void {
+        if (count === 0) return
+        const cur = queue.playListIndex
+        goTo(random ? nextShuffle() : (cur + 1 >= count ? 0 : cur + 1))
+    }
+
+    function previous(): void {
+        if (count === 0) return
+        const cur = queue.playListIndex
+        goTo(cur > 0 ? cur - 1 : count - 1)
+    }
+
+    // 播放一首曲目：已在队列则直接跳转，否则追加到队尾
+    function playItem(item: var): void {
+        if (!queue || !item || !item.path) return
+        let i = indexOfPath(item.path)
+        if (i < 0) {
+            queue.append({ name: item.name, path: item.path, songer: item.songer, source: item.source })
+            i = count - 1
+        }
+        goTo(i)
+    }
+
+    function startTrack(index: int): void {
+        const e = queue.get(index)
+        // 用 == 而非 ===，且不要对 e 取反：AOT 下这两种写法会导致切歌闪退
+        if (e.path == undefined) return
+        if (e.source < 0) playLocalSong(e.path, e.name)
+        else MusicApi.getMusicInfo(e.path, 0, e.source)
+    }
+
+    function noteNowPlaying(): void {
+        if (queue.playListIndex < 0 || count === 0 || !musicTitle) return
+        const e = queue.get(queue.playListIndex)
+        pushHistory({ title: musicTitle, artist: musicArtist, path: e.path, source: e.source,
+                      cover: mainMedia.urlStr || "",
+                      duration: player ? Math.floor(player.duration / 1000) : 0, time: Date.now() })
+    }
+
+    // 本地播放：立即起播不阻塞，元数据/封面/歌词就绪后回填
+    function playLocalSong(path: string, name: string): void {
+        localLyricsRequestPath = path
+        player.noTitle = name
+        musicTitle = name
+        musicArtist = ""
+        MusicApi.lyricsData = []
+        MusicApi.lyricsTranslate = []
+        MusicApi.readLocalMetadataAsync(path)
+        swap(function() {
+            player.source = path
+            player.play()
+        })
+    }
+
+    function indexOfPath(p: string): int { return queue ? queue.indexOfPath(p) : -1 }
+
+    // 真随机：洗牌牌堆一轮不重复，并避开最近播放
+    property var bag: []
+    property var recent: []
+    onCountChanged: bag = []
+
+    function nextShuffle(): int {
+        if (count < 2) return 0
+        const keep = Math.max(0, Options.settings.shuffleAvoid)
+        if (bag.length === 0) {
+            const skip = recent.slice(recent.length - keep)
+            const cur = queue ? queue.playListIndex : -1
+            bag = []
+            for (let i = 0; i < count; i++)
+                if (i !== cur && skip.indexOf(i) === -1) bag.push(i)
+            if (bag.length === 0)
+                for (let i = 0; i < count; i++) bag.push(i)
+            for (let k = bag.length - 1; k > 0; k--) {
+                const r = Math.floor(Math.random() * (k + 1))
+                const t = bag[k]; bag[k] = bag[r]; bag[r] = t
+            }
+        }
+        return bag.pop()
+    }
+
+    function notePlayed(i: int): void {
+        recent.push(i)
+        const keep = Math.max(0, Options.settings.shuffleAvoid)
+        if (recent.length > keep) recent = recent.slice(recent.length - keep)
+    }
 
     readonly property int fadeOutMs: 120
-    readonly property int drainMs: 260
     readonly property int fadeInMs: 220
     readonly property int guardMs: 1500
-
     readonly property bool fadeOn: Options.settings.fadeEnabled && Options.settings.fadeMs > 0
 
-    // 恢复音量：起播、兜底定时共用这一个入口
+    property bool armed: false          // 已静音，等待新音轨起播后淡回
+    property var nextAction: null       // 静音后要执行的动作
+    property var afterFade: null        // 淡变结束后的回调
+    property bool keepSilent: false     // 停止类操作：执行后不淡回
+
+    // 淡入：引擎在新数据段真正出声的那一刻开始推进
     function fadeIn(): void {
         armed = false
         guardTimer.stop()
         afterFade = null
-        if (!fadeOn) {
-            factor = 1
-            return
-        }
-        fadeAnime.stop()
-        fadeAnime.duration = fadeInMs
-        fadeAnime.to = 1
-        fadeAnime.start()
+        if (player) player.fadeInOnNextAudio(fadeOn ? fadeInMs : 0)
     }
 
-    // 通用淡变：暂停/睡眠等即时过渡，不排空设备缓冲
+    // 通用淡变：暂停/睡眠等即时过渡
     function fadeTo(v: real, then: var): void {
-        fadeAnime.stop()
-        if (!fadeOn) {
-            factor = v
-            if (then) then()
-            return
-        }
         afterFade = then || null
-        fadeAnime.duration = Options.settings.fadeMs
-        fadeAnime.to = v
-        fadeAnime.start()
+        if (player) player.fadeTo(v, fadeOn ? Options.settings.fadeMs : 0)
+        if (then) {
+            fadeTimer.interval = fadeOn ? Options.settings.fadeMs : 0
+            fadeTimer.restart()
+        }
     }
 
-    // 换源/重播/停止：action 在静音状态下执行；fadeBack=false 时不淡回
+    // 换源/重播/停止：action 在静音后执行；fadeBack=false 时不淡回
     function swap(action: var, fadeBack: var): void {
         if (!action) return
         nextAction = action
         keepSilent = fadeBack === false
-        if (!player || !player.playing) {
-            runNext()
-            return
-        }
+        if (!player || !player.playing || !fadeOn) { runNext(); return }
         armed = true
-        afterFade = function() { drainTimer.restart() }
-        fadeAnime.duration = fadeOutMs
-        fadeAnime.to = 0
-        fadeAnime.start()
+        player.fadeOut(fadeOutMs)
+        swapTimer.restart()
     }
 
     function runNext(): void {
@@ -88,40 +169,38 @@ QtObject {
             return
         }
         guardTimer.restart()            // 兜底：起播事件丢失也能恢复音量
-        if (player && player.playing) fadeIn()
+        armFadeIn()
     }
 
-    // 新音轨起播（onPlayingChanged）触发；音量未恢复就补一次淡入
-    function finishSwap(): void {
-        if (factor < 1) fadeIn()
+    // 补一次淡入（不碰 guardTimer，供 runNext 与兜底定时器共用）
+    function armFadeIn(): void {
+        if (!player) return
+        player.fadeInOnNextAudio(fadeOn ? fadeInMs : 0)
     }
+
+    function finishSwap(): void { armed = false }
 
     function togglePlay(): void {
         if (!player) return
-        if (player.playing) {
-            fadeTo(0, function() { player.pause() })
-            return
-        }
+        if (player.playing) { fadeTo(0, function() { player.pause() }); return }
         player.play()
-        if (factor < 1) fadeIn()
     }
 
-    property NumberAnimation fadeAnime: NumberAnimation {
-        target: root
-        property: "factor"
-        onFinished: {
+    property Timer swapTimer: Timer {
+        interval: root.fadeOutMs
+        onTriggered: root.runNext()
+    }
+    property Timer fadeTimer: Timer {
+        onTriggered: {
             const f = root.afterFade
             root.afterFade = null
             if (f) f()
         }
     }
-    property Timer drainTimer: Timer {
-        interval: root.drainMs
-        onTriggered: root.runNext()
-    }
     property Timer guardTimer: Timer {
         interval: root.guardMs
-        onTriggered: root.fadeIn()
+        // 只调用 root 的函数，不在嵌套对象里直接访问属性（与备份同构）
+        onTriggered: root.armFadeIn()
     }
 
     // 音量
@@ -163,7 +242,8 @@ QtObject {
         }
     }
 
-    // 睡眠定时 0.关闭 1.倒计时 2.播完本首
+    // 睡眠定时
+    // 0.关闭 1.倒计时 2.播完本首
     property int sleepMode: 0
     property int sleepRemain: 0
     readonly property string sleepLabel: sleepMode === 0 ? "关闭"
@@ -202,10 +282,7 @@ QtObject {
             return
         }
         for (let i = 1; i < history.count; i++) {
-            if (history.get(i).path === e.path) {
-                history.remove(i, 1)
-                break
-            }
+            if (history.get(i).path === e.path) { history.remove(i, 1); break }
         }
         history.insert(0, e)
         const limit = Math.max(20, Options.settings.historyLimit)
@@ -213,6 +290,29 @@ QtObject {
         queueSave()
     }
 
+    function saveQueue(): void {
+        const out = []
+        for (let i = 0; i < count; i++) {
+            const e = queue.get(i)
+            out.push({ name: e.name, path: e.path, songer: e.songer, source: e.source })
+        }
+        Options.settings.lastQueue = JSON.stringify(out)
+        Options.settings.lastQueueIndex = queue.playListIndex
+    }
+    function restoreSession(): void {
+        if (!Options.settings.autoRestoreQueue) return
+        try {
+            const arr = JSON.parse(Options.settings.lastQueue || "[]")
+            for (let i = 0; i < arr.length; i++) queue.append(arr[i])
+            const idx = Options.settings.lastQueueIndex
+            if (idx < 0 || idx >= count) return
+            queue.playListIndex = idx
+            if (Options.settings.resumePosition && Options.lastSongs.position > 0) {
+                pendingSeekPath = queue.get(idx).path
+                pendingSeek = Options.lastSongs.position
+            }
+        } catch (err) {}
+    }
     function clearHistory(): void { history.clear(); queueSave() }
 
     function loadHistory(): void {
@@ -242,72 +342,7 @@ QtObject {
         onTriggered: root.writeHistory()
     }
 
-    // 队列操作（路径查找由 C++ QueueModel 哈希表 O(1) 完成）
-    function indexOfPath(p: string): int {
-        return queue ? queue.indexOfPath(p) : -1
-    }
-
-    // 播放一首曲目：已在队列则直接跳转，否则追加到队尾
-    function playItem(item: var): void {
-        if (!queue || !item || !item.path) return
-        let i = indexOfPath(item.path)
-        if (i < 0) {
-            queue.append({ name: item.name, path: item.path, songer: item.songer, source: item.source })
-            i = root.count - 1
-        }
-        goTo(i)
-    }
-
-    // 真随机：洗牌牌堆，一轮内不重复，并避开最近播放
-    property var shuffleBag: []
-    property var recent: []
-    onCountChanged: shuffleBag = []
-
-    function buildBag(): var {
-        const n = root.count
-        const cur = queue ? queue.playListIndex : -1
-        let i
-        const bag = []
-        for (i = 0; i < n; i++)
-            if (i !== cur && recent.indexOf(i) === -1) bag.push(i)
-        if (bag.length === 0) for (i = 0; i < n; i++) bag.push(i)
-        for (let k = bag.length - 1; k > 0; k--) {
-            const r = Math.floor(Math.random() * (k + 1))
-            const t = bag[k]; bag[k] = bag[r]; bag[r] = t
-        }
-        return bag
-    }
-
-    function notePlayed(i: int): void {
-        recent.push(i)
-        const keep = Math.max(0, Options.settings.shuffleAvoid)
-        if (recent.length > keep) recent = recent.slice(recent.length - keep)
-    }
-
-    function goTo(i: int): void {
-        if (i < 0 || i >= root.count) return
-        queue.playListIndex = i
-        notePlayed(i)
-        playIndex(i)
-    }
-    function next(random: bool): void {
-        if (root.count === 0) return
-        if (random) { goTo(nextShuffle()); return }
-        const i = queue.playListIndex
-        goTo(i + 1 >= root.count ? 0 : i + 1)
-    }
-    function previous(): void {
-        if (root.count === 0) return
-        const i = queue.playListIndex
-        goTo(i - 1 < 0 ? root.count - 1 : i - 1)
-    }
-    function nextShuffle(): var {
-        if (root.count === 0) return -1
-        if (root.count === 1) return 0
-        if (shuffleBag.length === 0) shuffleBag = buildBag()
-        return shuffleBag.pop()
-    }
-
+    // 工具
     function fmt(ms: real): string {
         const s = Math.max(0, Math.floor(ms / 1000))
         return Math.floor(s / 60) + ":" + ("0" + (s % 60)).slice(-2)

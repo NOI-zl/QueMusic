@@ -198,7 +198,7 @@ Item {
         y: mainLayout.height / 1.7 + 20
         x: controlMaxLoader.infoX
         height: musicControlMax.standHeight
-        text: window.musicTitle
+        text: Playback.musicTitle
         font.weight: 600
         width: mainLayout.piclong
         elide: Text.ElideRight
@@ -224,7 +224,7 @@ Item {
         anchors.top: titleMax.bottom
         x: titleMax.x
         height: musicControlMax.standHeight / 3
-        text: window.musicArtist
+        text: Playback.musicArtist
         width: mainLayout.piclong
         elide: Text.ElideRight
         horizontalAlignment: controlMaxLoader.lyricsType === 1 ? Text.AlignHCenter : Text.AlignLeft
@@ -240,7 +240,7 @@ Item {
         y: 80
         height: 50
         width: implicitWidth > parent.width / 3 - 120 ? parent.width / 3 - 120 : implicitWidth
-        text: window.musicTitle + "    --" + window.musicArtist
+        text: Playback.musicTitle + "    --" + Playback.musicArtist
         elide: Text.ElideRight
         font.weight: 600
         font.pixelSize: 16
@@ -283,7 +283,8 @@ Item {
             fragmentShader: "qrc:/shaders/shaders/lyricfade.frag.qsb"
         }
 
-        property int currentPlayTime: mainMedia.position
+        property int currentPlayTime: mainMedia.position + lyricMove
+        property int lyricMove: 0
         readonly property int lyricHeight: musicControlMax.standHeight / 2
         property real alignPos: 0.32        // 当前行停在视口高度比例
         property real lineSpacing: musicControlMax.standHeight / 1.6
@@ -330,7 +331,7 @@ Item {
             onTriggered: {
                 const data = MusicApi.lyricsData;
                 if (!data || data.length === 0) return;
-                const pos = mainMedia.position + 320;
+                const pos = lyricContent.currentPlayTime + 320;
                 let idx = lyricContent.currentLine;
                 while (idx + 1 < data.length && pos >= data[idx + 1].time) idx++;
                 while (idx > 0 && pos < data[idx].time) idx--;
@@ -771,6 +772,24 @@ Item {
                     value: Style.settings.lyricSize
                     onMoved: {
                         Style.settings.lyricSize = value
+                    }
+                }
+            }
+            SettingItem {
+                label: "歌词位置校准"
+                width: parent.width
+                QSlider {
+                    anchors.right: parent.right
+                    from: -5000
+                    to: 5000
+                    stepSize: 200
+                    width: 160
+                    height: 36
+                    leftText: true
+                    valueText: (value / 1000).toFixed(1) + "s"
+                    value: lyricContent.lyricMove
+                    onMoved: {
+                        lyricContent.lyricMove = value
                     }
                 }
             }

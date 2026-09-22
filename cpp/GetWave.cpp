@@ -2,9 +2,17 @@
 // Copyright (c) 2026 QueMusic Contributors
 //
 #include "GetWave.h"
+
+#include "audio/AudioEngine.h"
+
 #include <QDebug>
 #include <cmath>
 #include <algorithm>
+
+namespace {
+constexpr int kRingFrames = 16384;   // 约 0.1~0.3 秒，只服务频谱显示
+constexpr int kMaxPushFrames = 8192;
+}
 
 // 构造 / 析构
 GetWave::GetWave(QObject *parent) : QObject(parent)
@@ -16,6 +24,9 @@ GetWave::GetWave(QObject *parent) : QObject(parent)
     // 预分配 FFT 缓冲区，固定大小 4096
     m_fftData.resize(m_fftSize);
     m_magnitudes.resize(m_fftSize / 2);
+    m_ring.configure(kRingFrames, 1);
+    m_mix.resize(kMaxPushFrames);
+    m_snapshot.resize(kRingFrames);
 }
 
 void GetWave::setBands(int b)
@@ -39,84 +50,54 @@ void GetWave::setEnabled(bool e)
 
     m_dataReady.storeRelease(0);
 
-    QMutexLocker locker(&m_mutex);
-    m_rawBuffer.clear();
-    m_spectrumData.fill(0.0);
-    m_wavePath.clear();
-
+    {
+        QMutexLocker locker(&m_visMutex);
+        m_spectrumData.fill(0.0);
+        m_wavePath.clear();
+    }
     emit spectrumChanged();
     emit wavePathChanged();
 }
 
-void GetWave::setMediaPlayer(QMediaPlayer *player)
+void GetWave::setEngine(AudioEngine *engine)
 {
-    if (m_mediaPlayer == player) return;
-
-    if (m_mediaPlayer && m_bufferOutput) {
-        disconnect(m_bufferOutput, &QAudioBufferOutput::audioBufferReceived,
-                   this, &GetWave::onBufferReceived);
-    }
-
-    m_mediaPlayer = player;
-    emit mediaPlayerChanged();
-
-    if (!m_mediaPlayer) return;
-
-    if (m_bufferOutput) {
-        m_bufferOutput->deleteLater();
-        m_bufferOutput = nullptr;
-    }
-
-    m_bufferOutput = new QAudioBufferOutput(this);
-    m_mediaPlayer->setAudioBufferOutput(m_bufferOutput);
-
-    connect(m_bufferOutput, &QAudioBufferOutput::audioBufferReceived,
-            this, &GetWave::onBufferReceived, Qt::DirectConnection);
+    if (m_engine == engine)
+        return;
+    if (m_engine)
+        m_engine->setSpectrumSink(nullptr);
+    m_engine = engine;
+    if (m_engine)
+        m_engine->setSpectrumSink(this);
+    emit engineChanged();
 }
 
 // QML 读取频谱
 QList<qreal> GetWave::spectrumData() const
 {
-    QMutexLocker locker(&m_mutex);
+    QMutexLocker locker(&m_visMutex);
     return m_spectrumData;
 }
 
-// 音频线程调用：只搬运数据，FFT 放线程池
-void GetWave::onBufferReceived(const QAudioBuffer &buffer)
+QVector<QPointF> GetWave::wavePath() const
 {
-    if (!buffer.isValid()) return;
-    if (!m_enabled) return;
+    QMutexLocker locker(&m_visMutex);
+    return m_wavePath;
+}
 
-    const QAudioFormat &fmt = buffer.format();
-    const int sampleRate = fmt.sampleRate();
-    const int channels = qMax(1, fmt.channelCount());
-    const int frames = int(buffer.sampleCount()) / channels;
-    if (frames <= 0)
+// 音频线程调用：降混到单声道写入无锁环，不取任何锁
+void GetWave::pushSamples(const float *interleaved, int frames, int channels, int sampleRate)
+{
+    if (!m_enabled || frames <= 0 || channels <= 0)
         return;
 
-    QVector<float> samples(frames);
-    if (fmt.sampleFormat() == QAudioFormat::Float) {
-        const float *data = buffer.constData<float>();
-        for (int i = 0; i < frames; ++i)
-            samples[i] = data[i * channels];
-    } else if (fmt.sampleFormat() == QAudioFormat::Int16) {
-        const qint16 *data = buffer.constData<qint16>();
-        for (int i = 0; i < frames; ++i)
-            samples[i] = data[i * channels] / 32768.0f;
-    } else {
-        return;
-    }
+    const int n = qMin(frames, kMaxPushFrames);
+    for (int i = 0; i < n; ++i)
+        m_mix[size_t(i)] = interleaved[size_t(i) * channels];
 
-    // 保留约 0.1 秒的数据
-    {
-        QMutexLocker locker(&m_mutex);
-        m_rawBuffer.append(samples);
-        const int maxSamples = sampleRate / 10;
-        if (m_rawBuffer.size() > maxSamples)
-            m_rawBuffer.remove(0, m_rawBuffer.size() - maxSamples);
-    }
+    if (m_ring.space() < n)
+        return;   // 渲染线程跟不上时丢弃本批，绝不阻塞音频线程
+    m_ring.write(m_mix.data(), n);
 
-    // 只搬运数据并标记有新数据，由渲染帧回调 updateSpectrum() 消费
     m_sampleRate.storeRelease(sampleRate);
     m_dataReady.storeRelease(1);
 }
@@ -124,18 +105,19 @@ void GetWave::onBufferReceived(const QAudioBuffer &buffer)
 // 渲染线程帧回调：每帧一次，有新数据才重算频谱，跟随窗口刷新率
 void GetWave::updateSpectrum()
 {
-    if (!m_enabled) return;
-    if (!m_dataReady.loadAcquire()) return;
+    if (!m_enabled)
+        return;
+    if (!m_dataReady.loadAcquire())
+        return;
     m_dataReady.storeRelease(0);
 
-    QVector<float> snapshot;
+    const int got = m_ring.read(m_snapshot.data(), kRingFrames);
+    if (got < 64)
+        return;
+
     {
-        QMutexLocker locker(&m_mutex);
-        snapshot = m_rawBuffer;
-    }
-    {
-        QMutexLocker locker(&m_mutex);
-        computeSpectrumFromFFT(snapshot, float(m_sampleRate.loadAcquire()));
+        QMutexLocker locker(&m_visMutex);
+        computeSpectrumFromFFT(m_snapshot.data(), got, float(m_sampleRate.loadAcquire()));
         rebuildWavePath(m_bands, 512.0, 80.0);
     }
     emit spectrumChanged();
@@ -155,13 +137,6 @@ void GetWave::setRenderWindow(QQuickWindow *window)
 }
 
 // 以下为FFT实现模块
-int GetWave::nextPowerOfTwo(int n)
-{
-    int p = 1;
-    while (p < n) p <<= 1;
-    return p;
-}
-
 void GetWave::fft(QVector<Complex> &data)
 {
     int n = data.size();
@@ -196,9 +171,8 @@ void GetWave::fft(QVector<Complex> &data)
 }
 
 // 核心：从 PCM 数据计算对数分布频谱（使用复用的成员缓冲区）
-void GetWave::computeSpectrumFromFFT(const QVector<float> &samples, float sampleRate)
+void GetWave::computeSpectrumFromFFT(const float *samples, int n, float sampleRate)
 {
-    int n = samples.size();
     if (n < 64) return;
 
     int fftN = m_fftSize;   // 固定大小

@@ -715,8 +715,7 @@ void WindowsSmtcManager::Private::updateMediaInfo(const QString &title,
 
     displayUpdater->put_Type(SmtcAbi::MediaPlaybackType_Music);
 
-    // AppMediaId：供 SMTC 按曲目区分/分组元信息。mediaId 有值则写入，
-    // 为空时写入空 HSTRING（即清除旧的 id，避免上一首曲目的分组残留）。
+    // mediaId 为空时写空 HSTRING，清除上一首的分组残留
     {
         SmtcAbi::HString hMediaId = SmtcAbi::HString::make(
             reinterpret_cast<PCWSTR>(mediaId.utf16()), UINT32(mediaId.size()));
@@ -741,7 +740,7 @@ void WindowsSmtcManager::Private::updateMediaInfo(const QString &title,
             musicProps->put_Artist(hArtist.get());
     }
 
-    // 专辑名：有值则写入；无值时写入空 HSTRING，清除上一首残留的专辑名。
+    // 无值时写空 HSTRING，清除上一首残留的专辑名
     {
         SmtcAbi::ComPtr<SmtcAbi::IMusicDisplayProperties2> musicProps2;
         if (SUCCEEDED(musicProps->QueryInterface(SmtcAbi::IID_IMusicDisplayProperties2,
@@ -754,8 +753,7 @@ void WindowsSmtcManager::Private::updateMediaInfo(const QString &title,
         }
     }
 
-    // 封面缩略图（专辑封面）：SMTC 弹窗里显示的音乐图标。
-    // 无封面时传空引用清除旧的缩略图，避免残留上一首歌曲封面。
+    // 无封面时传空引用，清除上一首残留的缩略图
     if (!cover.isEmpty()) {
         SmtcAbi::ComPtr<SmtcAbi::IRandomAccessStreamReference> thumb =
             SmtcAbi::createThumbnailFromUrl(cover);
@@ -792,11 +790,7 @@ void WindowsSmtcManager::Private::updateTimeline(qint64 positionMs, qint64 durat
     const qint64 safePosition = qMax<qint64>(0, positionMs);
     const qint64 safeDuration = qMax<qint64>(0, durationMs);
 
-    // 时长未知（如直播流或刚切歌、duration 尚未加载的瞬间）时，
-    // 用全零 TimelineProperties 重置时间线（而非直接返回），
-    // 避免系统媒体弹窗残留上一首歌曲的进度条；
-    // EndTime=0 时系统不显示进度条。
-    // 此分支不被节流，并复位节流状态，保证切歌瞬间立即清空残留进度。
+    // 时长未知时用全零时间线重置（EndTime=0 时不显示进度条），并复位节流状态
     if (safeDuration <= 0) {
         SmtcAbi::TimeSpan zero;
         zero.Duration = 0;
@@ -813,16 +807,7 @@ void WindowsSmtcManager::Private::updateTimeline(qint64 positionMs, qint64 durat
 
     const qint64 clampedPosition = qMin(safePosition, safeDuration);
 
-    // —— 进度节流 ——
-    // position 随播放约 10Hz 变化，
-    // 若每次都重建 TimelineProperties 再调 UpdateTimelineProperties，会高频触发 WinRT 全量重建。
-    // 这里仅在以下任一情况才推送：
-    //  1. 首次推送；
-    //  2. duration 变化（切歌/时长异常，关键事件不节流）；
-    //  3. 进度回退（seek 倒退）；
-    //  4. position 相对上次
-    // 已推送值前进达到阈值。
-    // 其余情况直接跳过本次重建，进度条仍以子系统可接受的频率平滑推进。
+    // 进度节流：仅首次、duration 变化、回退或前进超过阈值时才重建 WinRT 时间线
     const qint64 kTimelineThrottleMs = 200;
     const bool firstPush = (lastTimelineDurationMs < 0);
     const bool durationChange = (safeDuration != lastTimelineDurationMs);

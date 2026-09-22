@@ -50,7 +50,7 @@ Window {
         // 会话恢复与历史加载移出首帧：启动只做装配，数据就绪后回填
         Qt.callLater(function() {
             Playback.loadHistory();
-            window.restoreSession();
+            Playback.restoreSession();
         });
 
         if(Options.settings.cacheUrl)
@@ -61,11 +61,15 @@ Window {
             autoUpdateTimer.start();
     }
 
-    // 音质设置同步给 C++
     Binding {
         target: MusicApi
         property: "soundQuality"
         value: Options.settings.soundQuality
+    }
+    Binding {
+        target: MusicApi
+        property: "downloadPath"
+        value: Options.settings.downloadFolder
     }
 
 
@@ -88,31 +92,11 @@ Window {
         onTriggered: window.silentUpdateCheck()
     }
 
-    Connections {
-        target: Options.settings
-        function onDownloadFolderChanged(): void {
-            MusicApi.downloadPath = Options.settings.downloadFolder;
-        }
-    }
-    property string musicTitle: "QueMusic"
-    property string musicArtist: "Artist"
     property int exitIndex: 0
 
-    // 托盘"退出"时置位：跳过"关闭到托盘"直接退出
-    property bool forceQuit: false
-    // 隐藏到托盘前的窗口状态，恢复时还原最大化/全屏
-    property int trayRestoreVisibility: Window.Windowed
-    // 本次运行是否已提示过"已最小化到系统托盘"
-    property bool trayTipShown: false
 
-    property string localLyricsRequestPath: ""
-    property int pendingSeek: 0
-    property string pendingSeekPath: ""
-    property int smtcLastTimeline: 0
-    property int smtcLastPosition: 0
     readonly property bool isMacOS: Qt.platform.os === "osx"
 
-    // 统一搜索入口：清空结果、写入搜索历史并触发搜索
     function doSearch(text: string): void {
         MusicApi.searchSongsResults.clear();
         mainContent.contentIndexed(6);
@@ -122,123 +106,40 @@ Window {
         window.exitIndex = 1;
     }
 
-    // 播放本地歌曲：立即起播不阻塞，元数据/封面/歌词在工作线程就绪后回填
-    function playLocalSong(path: string, name: string): void {
-        window.localLyricsRequestPath = path;
-        mainMedia.urlLocal = true;
-        mainMedia.noTitle = name;
-        window.musicTitle = name;
-        window.musicArtist = "";
-        MusicApi.lyricsData = [];
-        MusicApi.lyricsTranslate = [];
-        MusicApi.readLocalMetadataAsync(path);
-
-        Playback.swap(function() {
-            mainMedia.source = path;
-            mainMedia.play();
-        });
-    }
-
     // 首次加载内容临时存储，防止重新加载浪费内存
     property QtObject completedStart: QtObject {
         property bool homeLoaded: false
         property bool playlistLoaded: false
     }
 
-    // 判断是否到托盘设置函数
-    function closeToTray(): bool {
-        return Options.settings.closeToManage && !window.forceQuit && systemTray.available;
-    }
-
-    // 关闭前保存最后播放的歌曲
-    function toClosing(): void {
-        if(window.closeToTray()) {
-            window.hideToTray();
-            return;
-        }
-        if(playListModel.count > 0 && playListModel.playListIndex >= 0) {
-            Options.lastSongs.name = window.musicTitle;
-            Options.lastSongs.artist = window.musicArtist;
-            Options.lastSongs.cover = mainMedia.urlStr || "qrc:/QueMusic/resources/app/musicpic.png";
-            Options.lastSongs.hash = playListModel.get(playListModel.playListIndex).path;
-            Options.lastSongs.source = playListModel.get(playListModel.playListIndex).source;
-            Options.lastSongs.position = mainMedia.position;
-            console.log("保存当前音乐记录。");
-        }
-        // 隐藏在托盘中的窗口（Hidden）几何信息依然有效，同样保存
-        if(Options.settings.rememberWindow
-                && window.visibility !== Window.Maximized
-                && window.visibility !== Window.FullScreen) {
-            Options.settings.winX = window.x;
-            Options.settings.winY = window.y;
-            Options.settings.winW = window.width;
-            Options.settings.winH = window.height;
-        }
-        window.saveQueue();
-        Playback.flush();
-        // 清理桌面悬浮窗
-        desktopLyricsLoader.active = false;
-        desktopPlayerLoader.active = false;
-        // 必须显式退出：窗口可能正隐藏在托盘里（close() 对不可见窗口不生效），
-        // 且已关闭 quitOnLastWindowClosed，进程不会因窗口关闭而自动结束
-        systemTray.quitApplication();
-    }
-
-    // 隐藏到系统托盘：任务栏图标随窗口一起消失，只剩托盘图标
-    function hideToTray(): void {
-        if(!window.visible)
-            return;
-        window.trayRestoreVisibility = window.visibility;
-        window.hide();
-        console.log("[托盘] 已隐藏到托盘，原窗口状态=" + window.trayRestoreVisibility);
-        if(!window.trayTipShown) {
-            window.trayTipShown = true;
-            systemTray.showMessage("QueMusic", "已最小化到系统托盘，点击托盘图标可恢复",
-                                   SystemTrayManager.Information);
-        }
-    }
-
-    // 从托盘恢复窗口：还原隐藏前的最大化/全屏状态
-    function restoreWindow(): void {
-        if(!window.visible) {
-            if(window.trayRestoreVisibility === Window.Maximized)
-                window.showMaximized();
-            else if(window.trayRestoreVisibility === Window.FullScreen)
-                window.showFullScreen();
-            else
-                window.showNormal();
-        } else if(window.visibility === Window.Minimized) {
-            window.showNormal();
-        }
-        window.raise();
-        window.requestActivate();
-    }
-
-    // 托盘菜单"退出"：走正常保存/关闭流程，但不再隐藏到托盘
-    function quitApp(): void {
-        window.forceQuit = true;
-        window.toClosing();
-    }
-
     // 系统级关闭（Alt+F4、任务栏右键"关闭窗口"）与关闭按钮行为保持一致
     onClosing: function(close) {
-        if(window.closeToTray()) {
+        if(win.closeToTray()) {
             close.accepted = false;
-            window.hideToTray();
+            win.hideToTray();
             return;
         }
         // 未开启托盘时也要走保存与会话收尾，不能直接放行
         close.accepted = false;
-        window.toClosing();
+        win.toClosing();
     }
 
+    WindowControls {
+        id: win
+        targetWindow: window
+        tray: systemTray
+        onSessionClosing: {
+            desktopLyricsLoader.active = false
+            desktopPlayerLoader.active = false
+        }
+    }
     signal getKeys(var keys)
-    signal exit() // 返回
+    signal exit()
 
     signal message(string title,string text,int type)
 
     Shortcut {
-        sequence: "Esc" // 返回
+        sequence: "Esc"
         context: Qt.ApplicationShortcut
         enabled: !Options.recordingShortCut
         onActivated: {
@@ -250,62 +151,6 @@ Window {
             mainLayout.forceActiveFocus();
         }
     }
-    Shortcut {
-        sequence: Options.shortCuts.play // 暂停/播放
-        context: Qt.ApplicationShortcut
-        enabled: Options.settings.openShortCut && Options.shortCuts.globalShortcutPlay
-        onActivated: {
-            console.log("shortcut--play");
-            Playback.togglePlay();
-        }
-    }
-    Shortcut {
-        sequence: Options.shortCuts.back // 上一首
-        context: Qt.ApplicationShortcut
-        enabled: Options.settings.openShortCut && Options.shortCuts.globalShortcutBack
-        onActivated: {
-            console.log("shortcut--back");
-            musicControlMin.lastMedia();
-        }
-    }
-    Shortcut {
-        sequence: Options.shortCuts.forward // 下一首
-        context: Qt.ApplicationShortcut
-        enabled: Options.settings.openShortCut && Options.shortCuts.globalShortcutForward
-        onActivated: {
-            console.log("shortcut--forward");
-            musicControlMin.enterMedia();
-        }
-    }
-    Shortcut {
-        sequence: Options.shortCuts.playList // 播放菜单
-        context: Qt.ApplicationShortcut
-        enabled: Options.settings.openShortCut && Options.shortCuts.globalShortcutPlayList
-        onActivated: {
-            console.log("shortcut--playList");
-            if(playList.visible) {
-                playList.close();
-            } else {
-                playList.open();
-            }
-        }
-    }
-    Shortcut {
-        sequence: Options.shortCuts.musicControl // 播放模式切换
-        context: Qt.ApplicationShortcut
-        enabled: Options.settings.openShortCut && Options.shortCuts.globalShortcutMusicControl
-        onActivated: {
-            if(mainLayout.state === "") {
-                controlMaxLoader.active = true;
-            } else {
-                window.playermined();
-                minedAnimation.start();
-                mainLayout.state = "";
-            }
-        }
-    }
-
-    // 辅助快捷键：音量 / 精确跳转 / 静音 / A-B / 收藏 / 播放器选项
     // 键位与开关都走设置页（Options.shortCuts / globalShortcut*）
     Instantiator {
         model: [
@@ -319,7 +164,20 @@ Window {
                 mainWarn.tiped(Playback.abArmed ? "A-B 循环已启用" : "已设置 A-B 起点", 1);
             } },
             { k: "favorite",      a: function() { musicControlMin.toggleFavorite() } },
-            { k: "playerOptions", a: function() { musicControlMin.openPlayerOptions() } }
+            { k: "playerOptions", a: function() { musicControlMin.openPlayerOptions() } },
+            { k: "play",          a: function() { Playback.togglePlay() } },
+            { k: "back",          a: function() { Playback.previous() } },
+            { k: "forward",       a: function() { Playback.next(false) } },
+            { k: "playList",      a: function() { playList.visible ? playList.close() : playList.open() } },
+            { k: "musicControl",  a: function() {
+                if (mainLayout.state === "") {
+                    controlMaxLoader.active = true;
+                } else {
+                    window.playermined();
+                    minedAnimation.start();
+                    mainLayout.state = "";
+                }
+            } }
         ]
         delegate: Shortcut {
             readonly property string flag: "globalShortcut" + modelData.k.charAt(0).toUpperCase() + modelData.k.slice(1)
@@ -330,7 +188,6 @@ Window {
         }
     }
 
-    //加载icon库
     FontLoader {
         id: iconFont
         source: "qrc:/QueMusic/resources/fonts/feather.ttf"
@@ -340,7 +197,6 @@ Window {
         source: "qrc:/QueMusic/resources/fonts/poppins.ttf"
     }
 
-    // QWindowKit窗口代理
     WindowAgent {
         id: windowAgent
     }
@@ -364,7 +220,6 @@ Window {
             y: 10
             width: 180
             height: 40
-            //visible: !window.isMacOS
             Component.onCompleted: windowAgent.setHitTestVisible(appTitleBlock, true)
         }
 
@@ -418,7 +273,7 @@ Window {
                     height: 36
                     width: 201
                     radius: 18
-                    color: Style.themes.primaryColor//Style.themes.secondaryColor
+                    color: Style.themes.primaryColor
                 }
             }
             SButton {
@@ -440,10 +295,9 @@ Window {
             }
         }
 
-        // 窗口按钮
         Row {
             anchors {
-                right: parent.right // 靠右
+                right: parent.right
                 rightMargin: 16
             }
             spacing: 0
@@ -516,7 +370,7 @@ Window {
                 id: closeButton
                 source: closeButton.hovered ? hover : unhover
                 hoverColor: "#ee4848"
-                onClicked: window.toClosing();
+                onClicked: win.toClosing();
                 Component.onCompleted: {
                     if(window.isMacOS) {
                         visible = false;
@@ -528,7 +382,6 @@ Window {
         }
     }
 
-    //MainLayout
     Item {
         id: mainLayout
         anchors.fill: parent
@@ -606,7 +459,6 @@ Window {
             }
         ]
 
-        // Style变化信号统一
         Connections {
             target: Style
             function onChangeTheme(): void {
@@ -674,7 +526,6 @@ Window {
             width: 210
         }
 
-        // 主体内容区域
         MainContent {
             z: 1
             id: mainContent
@@ -684,7 +535,6 @@ Window {
             height: parent.height - 78
         }
 
-        // 底部栏
         PlayerControl {
             id: musicControlMin
             x: 0
@@ -693,7 +543,6 @@ Window {
             z: 4
         }
 
-        //单独分离音乐封面
         Item {
             id: musicpic
             z: 5
@@ -748,7 +597,6 @@ Window {
             // 为优化性能，取消鼠标点击相关设计，下载封面可到关于歌曲下载
         }
 
-        // 全窗口沉浸歌词页
         Loader {
             id: controlMaxLoader
             x: 0
@@ -783,7 +631,6 @@ Window {
             height: mainLayout.height
             sourceComponent: PlayerMaxCenter {}//"qrc:/QueMusic/layout/PlayerMaxCenter.qml"
         }
-        //提取颜色部分
         Item {
             id: coverColor
             width: 800
@@ -874,7 +721,6 @@ Window {
         }
     }
 
-    // 调试模式：运行时状态面板
     Loader {
         active: Options.settings.debug
         visible: active
@@ -950,7 +796,7 @@ Window {
     CoverHelper {
         id: coverHelper
         onLocalCoverReady: (path, coverUrl) => {
-            if (path !== window.localLyricsRequestPath)
+            if (path !== Playback.localLyricsRequestPath)
                 return;
             const localCover = coverUrl || coverHelper.findLocalCover(path);
             mainMedia.urlStr = localCover || "qrc:/QueMusic/resources/app/musicpic.png";
@@ -963,10 +809,9 @@ Window {
         target: MusicApi
         function onUrlplay(playurl: string, title: string, artist: string, cover: string,
                            solve: string, hash: string, source: int): void {
-            mainMedia.urlLocal = false;
             mainMedia.noTitle = title;
-            window.musicTitle = title;
-            window.musicArtist = artist;
+            Playback.musicTitle = title;
+            Playback.musicArtist = artist;
             mainMedia.urlStr = cover;
             colorExtractor.extractColorsFromUrl(solve);
             // 淡出静音排空设备缓冲后再换源：上一首仍在播放，直接换 source 会截断波形产生爆音
@@ -983,28 +828,27 @@ Window {
                 playListModel.playListIndex = listIndex;
             }
         }
-        // C++ 下载/提示信号
         function onWarned(text: string, type: int): void {
             mainWarn.tiped(text,type);
         }
         function onLocalLyricsReady(filePath: string, lyrics: var, translate: var): void {
-            if (filePath !== window.localLyricsRequestPath)
+            if (filePath !== Playback.localLyricsRequestPath)
                 return;
             MusicApi.lyricsData = lyrics;
             MusicApi.lyricsTranslate = translate || [];
         }
         function onLocalLyricsFailed(filePath: string): void {
-            if (filePath !== window.localLyricsRequestPath)
+            if (filePath !== Playback.localLyricsRequestPath)
                 return;
             MusicApi.setLocalLyrics();
         }
         function onLocalMetadataReady(filePath: string, meta: var): void {
-            if (filePath !== window.localLyricsRequestPath)
+            if (filePath !== Playback.localLyricsRequestPath)
                 return;
             if (meta.title)
-                window.musicTitle = meta.title;
+                Playback.musicTitle = meta.title;
             if (meta.artist)
-                window.musicArtist = meta.artist;
+                Playback.musicArtist = meta.artist;
             if (meta.album)
                 mainMedia.album = meta.album;
             const hasMetaLyrics = meta.lyrics && meta.lyrics.length > 0;
@@ -1024,73 +868,54 @@ Window {
     }
 
 
-    // 切歌爆音抑制
-    AudioOutput { id: volumeValue; volume: Playback.outVolume; device: Options.settings.useDefaultDevice ? musicDevices.defaultAudioOutput : musicDevices.audioOutputs[Options.settings.audioDevice] }
     MediaDevices { id: musicDevices }
-    // 主媒体
     GetWave {
         id: getWave
-        mediaPlayer: mainMedia
+        engine: mainMedia
         renderWindow: window
-        enabled: Style.settings.waveDisplay && controlMaxLoader.visible//mainMedia.playing
+        enabled: Style.settings.waveDisplay && controlMaxLoader.visible
         bands: 128
     }
 
-    MediaPlayer {
+    AudioEngine {
         id: mainMedia
         property string noTitle
         property string urlStr: "qrc:/QueMusic/resources/app/musicpic.png"
         property string album
         property string date
         property string type
-        property bool urlLocal
-        property bool onMedia: mediaStatus !== MediaPlayer.NoMedia
-        property int audioBit: Math.floor(mainMedia.metaData.stringValue(MediaMetaData.AudioBitRate) / 1000)
-        audioOutput: volumeValue
+        property bool onMedia: mediaStatus !== AudioEngine.NoMedia
+        property int audioBit: bitRate
 
         source: ""
-        autoPlay: Options.settings.autoPlay
+        volume: Playback.outVolume
+        deviceId: Options.settings.useDefaultDevice || musicDevices.audioOutputs.length <= Options.settings.audioDevice
+                  ? "" : String(musicDevices.audioOutputs[Options.settings.audioDevice].id)
+
         onMetaDataChanged: {
-            if(!urlLocal)
-                return;
-
-            const title = mainMedia.metaData.stringValue(MediaMetaData.Title);
-            const artist = mainMedia.metaData.stringValue(MediaMetaData.AlbumArtist) || mainMedia.metaData.value(MediaMetaData.Author);
-            const album = mainMedia.metaData.stringValue(MediaMetaData.AlbumTitle);
-            const date = mainMedia.metaData.value(MediaMetaData.Date);
-            const type = mainMedia.metaData.value(MediaMetaData.MediaType);
-            // 内嵌封面：优先大图，退化到缩略图
-            const cover = mainMedia.metaData.value(MediaMetaData.CoverArtImage) || mainMedia.metaData.value(MediaMetaData.ThumbnailImage);
-
-            window.musicTitle = title || noTitle
+            if (mainMedia.source.toString().startsWith("http"))
+                return
+            if (tagTitle)
+                Playback.musicTitle = tagTitle
             if (artist)
-                window.musicArtist = artist
-            if (album)
-                mainMedia.album = album
-            if (date)
-                mainMedia.date = date.toString()
-            if (type)
-                mainMedia.type = type.toString()
-
-            if (cover) {
-                colorExtractor.extractColorsFromImage(cover)
-                urlStr = coverHelper.convertVariantToUrl(cover)
-            } else {
-                //var localCover = coverHelper.findLocalCover(mainMedia.source)
-                //if (localCover)
-                //    colorExtractor.extractColorsFromUrl(localCover)
-            }
+                Playback.musicArtist = artist
+            if (albumTitle)
+                mainMedia.album = albumTitle
+            mainMedia.date = mediaDate
+            mainMedia.type = mediaType
         }
 
         onMediaStatusChanged: {
-            if(mediaStatus === MediaPlayer.EndOfMedia) {
+            if (mediaStatus === AudioEngine.LoadedMedia)
+                Playback.autoSkipCount = 0;
+            if(mediaStatus === AudioEngine.EndOfMedia) {
                 if(Playback.sleepMode === 2) {
                     Playback.sleepEnd();
                     return;
                 }
                 switch(Options.settings.cycleIndex) {
                     case 0:
-                        musicControlMin.enterMedia();
+                        Playback.next(false);
                         break;
                     case 1:
                         // 重播同样会刷新缓冲，走淡出/淡入
@@ -1100,7 +925,7 @@ Window {
                         })
                         break;
                     case 2:
-                        musicControlMin.randomMedia();
+                        Playback.next(true);
                         break;
                     case 3:
                         // 停止不再淡回，直接复位音量乘数
@@ -1112,17 +937,21 @@ Window {
 
         onErrorOccurred: {
             if(playListModel.count < 2) return;
+            if (Playback.autoSkipCount >= 2) {
+                Playback.autoSkipCount = 0;
+                Style.warned("连续多首无法播放，已停止自动跳过", 0);
+                return;
+            }
+            Playback.autoSkipCount += 1;
             Style.warned("当前歌曲无法播放，已自动跳过",0);
             if(Options.settings.cycleIndex === 2) {
-                musicControlMin.randomMedia();
+                Playback.next(true);
             } else {
-                musicControlMin.enterMedia();
+                Playback.next(false);
             }
         }
 
         onUrlStrChanged: {
-            if (windowsSmtc.available)
-                smtcUpdateMediaInfo();
         }
 
         // 新音轨真正起播后再淡回，避免音频设备重开的瞬间已经有音量
@@ -1131,64 +960,25 @@ Window {
                 Playback.finishSwap();
         }
     }
-    // 依据播放列表上下文动态启用/禁用 SMTC 的上一首/下一首按钮
-    // （无上一首/下一首时禁用对应按钮，避免一律恒启用）
-    function updateSmtcControls(): void {
-        if (!windowsSmtc.available)
-            return;
-        const count = playListModel.count;
-        const idx = playListModel.playListIndex;
-        windowsSmtc.setControlsEnabled(true, true, idx < count - 1, idx > 0);
-    }
-
-    // 统一将当前曲目信息推给 SMTC。
-    function smtcUpdateMediaInfo(): void {
-        if (!windowsSmtc.available)
-            return
-        let mediaId = ""
-        if (playListModel.count > 0 && playListModel.playListIndex >= 0) {
-            const item = playListModel.get(playListModel.playListIndex)
-            if (item)
-                mediaId = item.path
-        }
-        windowsSmtc.updateMediaInfo(window.musicTitle, window.musicArtist, mainMedia.album, mainMedia.urlStr, mediaId)
-    }
-
-    // Windows SMTC
-    WindowsSmtcManager {
-        id: windowsSmtc
-
-        Component.onCompleted: {
-            windowsSmtc.initialize(window);
-            updateSmtcControls();
-        }
-        onPlayPressed: { Playback.togglePlay() }
-        onPausePressed: { Playback.togglePlay() }
-        onNextPressed: { musicControlMin.enterMedia() }
-        onPreviousPressed: { musicControlMin.lastMedia() }
-        onSeekRequested: (pos) => { mainMedia.position = pos }
-    }
-
-    // 系统托盘：常驻托盘图标 + 原生菜单，窗口关闭时隐藏到这里
     SystemTrayManager {
         id: systemTray
         iconSource: "qrc:/QueMusic/resources/icon.ico"
         title: "QueMusic"
-        playing: mainMedia.playbackState === MediaPlayer.PlayingState
-        nowPlaying: window.musicTitle !== "QueMusic"
-                    ? window.musicTitle + (window.musicArtist && window.musicArtist !== "Artist"
-                                           ? " - " + window.musicArtist : "")
+        playing: mainMedia.playbackState === AudioEngine.PlayingState
+        nowPlaying: Playback.musicTitle !== "QueMusic"
+                    ? Playback.musicTitle + (Playback.musicArtist && Playback.musicArtist !== "Artist"
+                                           ? " - " + Playback.musicArtist : "")
                     : ""
 
-        onShowWindowRequested: window.restoreWindow()
+        onShowWindowRequested: win.restoreWindow()
         onPlayPauseRequested: Playback.togglePlay()
-        onPreviousRequested: musicControlMin.lastMedia()
-        onNextRequested: musicControlMin.enterMedia()
-        onQuitRequested: window.quitApp()
+        onPreviousRequested: Playback.previous()
+        onNextRequested: Playback.next(false)
+        onQuitRequested: win.quitApp()
         onActivated: (reason) => {
             // 左键单击 / 双击托盘图标：恢复主界面
             if(reason === SystemTrayManager.Trigger || reason === SystemTrayManager.DoubleClick)
-                window.restoreWindow();
+                win.restoreWindow();
         }
     }
 
@@ -1196,134 +986,40 @@ Window {
         target: mainMedia
 
         function onSourceChanged(): void {
-            Playback.clearAb() // A-B 片段按曲目绑定，切歌即失效
-            // 切歌/新曲目开始播放的瞬间：主动推送 position=0 并刷新时间线；
-            // duration 尚未就绪（<=0）时由 C++ 侧走全零重置分支清空上一首的残留进度。
-            if (windowsSmtc.available)
-                windowsSmtc.updateTimeline(0, mainMedia.duration)
-            updateSmtcControls()
+            Playback.clearAb()
         }
         function onDurationChanged(): void {
             // 断点续播：恢复的曲目首次拿到时长时跳转到上次位置
-            if (mainMedia.duration > 0 && window.pendingSeek > 0
+            if (mainMedia.duration > 0 && Playback.pendingSeek > 0
                 && playListModel.playListIndex >= 0
-                && window.pendingSeekPath === playListModel.get(playListModel.playListIndex).path) {
-                mainMedia.position = Math.min(window.pendingSeek, mainMedia.duration - 1000)
-                window.pendingSeek = 0
-                window.pendingSeekPath = ""
+                && Playback.pendingSeekPath === playListModel.get(playListModel.playListIndex).path) {
+                mainMedia.position = Math.min(Playback.pendingSeek, mainMedia.duration - 1000)
+                Playback.pendingSeek = 0
+                Playback.pendingSeekPath = ""
             }
-            // 新歌时长加载完成：以 position=0 主动推送一条完整时间线，
-            // 随后 onPositionChanged 会用实时位置持续刷新。
-            if (windowsSmtc.available && mainMedia.duration > 0)
-                windowsSmtc.updateTimeline(0, mainMedia.duration)
         }
         function onPlaybackStateChanged(): void {
-            updateSmtcControls()
-            if (mainMedia.playbackState === MediaPlayer.PlayingState)
-                window.noteNowPlaying()
-            if (!windowsSmtc.available)
-                return
-            switch (mainMedia.playbackState) {
-            case MediaPlayer.PlayingState:
-                windowsSmtc.setPlaybackStatus(WindowsSmtcManager.Playing)
-                break
-            case MediaPlayer.PausedState:
-                windowsSmtc.setPlaybackStatus(WindowsSmtcManager.Paused)
-                break
-            case MediaPlayer.StoppedState:
-                windowsSmtc.setPlaybackStatus(WindowsSmtcManager.Stopped)
-                break
-            case MediaPlayer.NoMediaState:
-                windowsSmtc.setPlaybackStatus(WindowsSmtcManager.Closed)
-                break
-            default:
-                windowsSmtc.setPlaybackStatus(WindowsSmtcManager.Closed)
-                break
-            }
-        }
-        function onPositionChanged(): void {
-            if (!windowsSmtc.available)
-                return
-            const now = Date.now()
-            const jump = Math.abs(mainMedia.position - window.smtcLastPosition)
-            if (now - window.smtcLastTimeline < 5000 && jump < 3000
-                && mainMedia.duration - mainMedia.position > 5000)
-                return
-            window.smtcLastTimeline = now
-            window.smtcLastPosition = mainMedia.position
-            windowsSmtc.updateTimeline(mainMedia.position, mainMedia.duration)
+            if (mainMedia.playbackState === AudioEngine.PlayingState)
+                Playback.noteNowPlaying()
         }
     }
 
-    onMusicTitleChanged: {
-        if (windowsSmtc.available)
-            smtcUpdateMediaInfo();
-    }
-    onMusicArtistChanged: {
-        if (windowsSmtc.available)
-            smtcUpdateMediaInfo();
+    SmtcBridge {
+        id: smtc
+        player: mainMedia
+        queue: playListModel
+        targetWindow: window
     }
 
     // 播放列表（C++ QueueModel：O(1) 路径查找、批量操作、角色化访问）
     QueueModel {
         id: playListModel
         playListIndex: -1
-        onCountChanged: updateSmtcControls()
-        onPlayListIndexChanged: updateSmtcControls()
     }
 
-    // 播放列表持久化
-    function saveQueue(): void {
-        const out = []
-        for (let i = 0; i < playListModel.count; i++) {
-            const e = playListModel.get(i)
-            out.push({ name: e.name, path: e.path, songer: e.songer, source: e.source })
-        }
-        Options.settings.lastQueue = JSON.stringify(out)
-        Options.settings.lastQueueIndex = playListModel.playListIndex
-    }
 
-    // 启动恢复上次列表，并记住断点位置（首次播放时跳转）
-    function restoreSession(): void {
-        if (!Options.settings.autoRestoreQueue) return
-        try {
-            const arr = JSON.parse(Options.settings.lastQueue || "[]")
-            for (let i = 0; i < arr.length; i++) playListModel.append(arr[i])
-            const idx = Options.settings.lastQueueIndex
-            if (idx < 0 || idx >= playListModel.count) return
-            playListModel.playListIndex = idx
-            if (Options.settings.resumePosition && Options.lastSongs.position > 0) {
-                window.pendingSeekPath = playListModel.get(idx).path
-                window.pendingSeek = Options.lastSongs.position
-            }
-        } catch (err) {}
-    }
+    // 连续自动跳过计数：坏文件（文件被移走/在线源失效）会把队列刷成无限跳歌
 
-    function startTrack(index: int): void {
-        const e = playListModel.get(index)
-        if (!e) return
-        if (e.source === -1) window.playLocalSong(e.path, e.name)
-        else { mainMedia.urlLocal = false; MusicApi.getMusicInfo(e.path, 0, e.source) }
-    }
-
-    function noteNowPlaying(): void {
-        if (playListModel.playListIndex < 0 || playListModel.count === 0 || !window.musicTitle) return
-        const e = playListModel.get(playListModel.playListIndex)
-        Playback.pushHistory({
-            title: window.musicTitle,
-            artist: window.musicArtist,
-            path: e.path,
-            source: e.source,
-            cover: mainMedia.urlStr || "",
-            duration: Math.floor(mainMedia.duration / 1000),
-            time: Date.now()
-        })
-    }
-
-    Connections {
-        target: Playback
-        function onPlayIndex(index: int): void { window.startTrack(index) }
-    }
     SearchCard {
         id: searchCard
         onSearchIndex: (index) => {
@@ -1338,7 +1034,6 @@ Window {
         id: desktopPlayer
     }
 
-    // 沉浸模式
     Loader {
         id: musicCenter
         active: false
@@ -1346,7 +1041,6 @@ Window {
         visible: status == Loader.Ready
         source: "qrc:/QueMusic/FullCenterView.qml"
     }
-    // 桌面小窗播放器
     Loader {
         id: desktopPlayerLoader
         active: false
@@ -1354,7 +1048,6 @@ Window {
         visible: status == Loader.Ready
         source: "qrc:/QueMusic/components/DesktopPlayerWindow.qml"
     }
-    // 桌面歌词
     Loader {
         id: desktopLyricsLoader
         active: false
@@ -1371,7 +1064,6 @@ Window {
 
         property var dialogCallback: null
 
-        // 通用简单确认对话框：点击"确定"后执行 callBack 回调
         function openSimpleDialog(title: string, text: string, callBack: var): void {
             globalDialog.title = title;
             globalDialog.message = text;
@@ -1381,7 +1073,6 @@ Window {
         }
 
         onConfirm: {
-            // 若有回调则执行回调，否则保持原有默认行为（关闭窗口）
             if (globalDialog.dialogCallback) {
                 const cb = globalDialog.dialogCallback;
                 globalDialog.dialogCallback = null;

@@ -23,8 +23,9 @@ depends=(
     'libxcb'
     'xcb-util-cursor'
     'xcb-util-wm'
+    'ffmpeg'
 )
-makedepends=('cmake' 'ninja' 'git')
+makedepends=('cmake' 'ninja' 'git' 'pkgconf')
 source=("${pkgname}-${pkgver}::git+https://github.com/BroNekoX/QueMusic.git#tag=v${pkgver}")
 sha256sums=('SKIP')
 

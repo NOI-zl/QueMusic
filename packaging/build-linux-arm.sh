@@ -44,13 +44,19 @@ fi
 # ---------- 0. 检查系统依赖 ----------
 echo "==> [0/5] 检查系统依赖..."
 MISSING=""
-for c in cmake ninja wget python3 pip pip3 git; do
+for c in cmake ninja wget python3 pip pip3 git pkg-config; do
     command -v "$c" >/dev/null 2>&1 || MISSING="$MISSING $c"
 done
 if [ -n "$MISSING" ]; then
     echo "!! 缺少依赖:${MISSING}"
-    echo "    Arch ARM:  sudo pacman -S --needed base-devel cmake ninja wget python-pip git fuse2 libpulse"
-    echo "    Debian/Ubuntu arm64: sudo apt install build-essential cmake ninja-build wget python3-pip git libfuse2 libpulse-dev"
+    echo "    Arch ARM:  sudo pacman -S --needed base-devel cmake ninja wget python-pip git fuse2 libpulse ffmpeg pkgconf"
+    echo "    Debian/Ubuntu arm64: sudo apt install build-essential cmake ninja-build wget python3-pip git libfuse2 libpulse-dev libavcodec-dev libavformat-dev libavutil-dev libswresample-dev pkg-config"
+    exit 1
+fi
+if ! pkg-config --exists libavcodec; then
+    echo "!! 缺少 FFmpeg 开发包（音频后端解码层）"
+    echo "    Arch ARM:  sudo pacman -S ffmpeg pkgconf"
+    echo "    Debian/Ubuntu arm64: sudo apt install libavcodec-dev libavformat-dev libavutil-dev libswresample-dev pkg-config"
     exit 1
 fi
 

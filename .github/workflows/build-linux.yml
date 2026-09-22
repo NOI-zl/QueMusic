@@ -4,20 +4,31 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: '要创建的 Release tag（如 v0.2.0）。不能与已有 tag 重复。'
-        required: true
+        description: '要创建的 Release tag（如 v0.5.1）。留空则只构建、不发布。'
+        required: false
         default: ''
   push:
     tags:
-      - "v*"
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_VERSION: '6.10.3'
+  QT_DIR: ${{ github.workspace }}/Qt
+  APPIMAGE_NAME: QueMusic-x86_64.AppImage
 
 jobs:
-  build-linux:
-    runs-on: ubuntu-latest
-    permissions:
-        contents: write
+  build:
+    runs-on: ubuntu-24.04
+
     steps:
-      - name: Checkout with submodules
+      - name: Checkout（务必带 QWindowKit 子模块）
         uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -32,187 +43,267 @@ jobs:
             libxcb-cursor0 libxcb-cursor-dev libxcb-randr0-dev \
             libxcb-shape0-dev libxcb-xinerama0-dev libxcb-xkb-dev \
             libxkbcommon-dev libxkbcommon-x11-dev \
-            libgl1-mesa-dev libfuse2 ninja-build wget file \
+            libgl1-mesa-dev libegl1-mesa-dev libfuse2 ninja-build wget file \
             libpulse-dev libpulse0 \
             extra-cmake-modules libx11-dev \
-            libwayland-dev libwayland-bin wayland-protocols
-          # 说明：
-          #   - 不再安装 qt6-wayland：那是「系统 Qt」的插件，与本项目 aqt 安装的
-          #     Qt 6.10.3 ABI 不匹配；Wayland 插件必须取自 aqt 的 Qt 目录
-          #   - 不再使用系统包 fcitx5-frontend-qt6 里的插件：它针对 Ubuntu 自带 Qt 编译，
-          #     塞进 Qt 6.10.3 运行时存在 ABI 风险，改为用同一份 Qt 从源码编译（见下一步）
-          #   - extra-cmake-modules(ECM) / libx11-dev / libwayland-* 是编译 fcitx5-qt 插件所需：
-          #     fcitx5-qt 默认开启 ENABLE_QT6_WAYLAND_WORKAROUND，会 find_package(Qt6 ... WaylandClient)，
-          #     而 Qt6WaylandClient 在配置期又要 find_package(Wayland)（由 ECM 提供，比 Qt 自带的更严格）：
-          #       libwayland-dev 提供 /usr/share/wayland/wayland.xml 与 client/server/cursor/egl 开发文件
-          #       libwayland-bin 提供 wayland-scanner
-          #     缺了它们，fcitx5-qt 配置阶段会以 "Failed to find required Qt component WaylandClient" 失败
+            libwayland-dev libwayland-bin wayland-protocols \
+            libvulkan1 libvulkan-dev \
+            libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev \
+            libavcodec-dev libavformat-dev libavutil-dev libswresample-dev
 
-      - name: Install Qt 6.10.3 (aqtinstall)
+      - name: Install Qt (aqtinstall)
         run: |
           python3 -m pip install --break-system-packages aqtinstall
-          python3 -m aqt install-qt linux desktop 6.10.3 linux_gcc_64 \
-            -O "$HOME/Qt" \
+          python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 \
+            -O "${QT_DIR}" \
             -m qtmultimedia qtshadertools qt5compat
-          echo "$HOME/Qt/6.10.3/gcc_64/bin" >> "$GITHUB_PATH"
+          echo "${QT_DIR}/${QT_VERSION}/gcc_64/bin" >> "$GITHUB_PATH"
+
+      - name: Sanity check Qt installation（Wayland / OpenGL / Vulkan 能力）
+        run: |
+          set -euo pipefail
+          QTDIR="${QT_DIR}/${QT_VERSION}/gcc_64"
+          echo "QTDIR=$QTDIR"
+          FAIL=0
+          has() { if ls "$1" > /dev/null 2>&1; then echo "✅ $2"; else echo "❌ $2（无匹配: $1）"; FAIL=1; fi; }
+          has "$QTDIR/plugins/platforms/libqwayland-generic.so" "Wayland 平台插件"
+          has "$QTDIR/plugins/wayland-shell-integration/libxdg-shell.so" "Wayland shell 集成 (xdg-shell)"
+          has "$QTDIR/lib/libQt6WaylandClient.so.6"            "libQt6WaylandClient"
+          has "$QTDIR/lib/libQt6WaylandEglClientHwIntegration.so.6" "libQt6WaylandEglClientHwIntegration"
+          has "$QTDIR/lib/libQt6OpenGL.so.6"                   "libQt6OpenGL"
+          # Vulkan RHI 由 libQt6Gui 内置，不额外装模块，只确认存在
+          if strings "$QTDIR/lib/libQt6Gui.so.6" 2>/dev/null | grep -qi vulkan; then
+            echo "✅ QtGui 具备 Vulkan RHI"
+          else
+            echo "❌ QtGui 未检出 Vulkan 支持"; FAIL=1
+          fi
+          [ "$FAIL" -eq 0 ] || {
+            echo "::error::Qt 安装缺少 Wayland 组件。请在 install-qt 的 -m 中补上 qtwayland 后重试。"
+            exit 1
+          }
 
       - name: Configure (CMake)
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$HOME/Qt/6.10.3/gcc_64"
+            -DCMAKE_PREFIX_PATH="${QT_DIR}/${QT_VERSION}/gcc_64"
 
       - name: Build
-        run: |
-          cmake --build build -j"$(nproc)"
+        run: cmake --build build -j"$(nproc)"
 
-      # 用与 aqt 完全相同的一份 Qt 6.10.3 从源码编译 fcitx5 的 Qt6 输入法插件。
-      # Qt 的平台输入法插件只对 major 版本硬校验，用系统包（针对 Ubuntu 自带 Qt 编译）
-      # 装进 6.10.3 运行时存在 ABI 风险 → 自己编一份，版本严格匹配。
-      # BUILD_ONLY_PLUGIN=ON：只编输入法插件，并把 fcitx5-qt 的公共代码（含 DBusAddons）
-      # 静态链接进插件，产物自包含 —— 不需要额外打包 libFcitx5Qt6DBusAddons，
-      # 也不会把 fcitx5 核心库带进 AppImage（避免与用户机器上的 fcitx5 守护进程版本冲突）。
       - name: Build fcitx5 Qt6 input method plugin
         run: |
+          set -euo pipefail
           git clone --depth 1 https://github.com/fcitx/fcitx5-qt.git fcitx5-qt
           cmake -S fcitx5-qt -B fcitx5-qt/build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$HOME/Qt/6.10.3/gcc_64" \
+            -DCMAKE_PREFIX_PATH="${QT_DIR}/${QT_VERSION}/gcc_64" \
             -DENABLE_QT4=OFF \
             -DENABLE_QT5=OFF \
             -DENABLE_QT6=ON \
             -DBUILD_ONLY_PLUGIN=ON
           cmake --build fcitx5-qt/build -j"$(nproc)"
-          find fcitx5-qt/build -name "libfcitx5platforminputcontextplugin*.so"
+          find fcitx5-qt/build -name 'libfcitx5platforminputcontextplugin*.so'
+          find fcitx5-qt/build -name 'libFcitx5Qt6*.so*'
 
-      - name: Download linuxdeploy tools
+      - name: 只保留 sqlite 驱动（从 Qt 安装目录删，避免被 linuxdeploy 带进包）
         run: |
-          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
+          find "${QT_DIR}/${QT_VERSION}/gcc_64/plugins/sqldrivers" \
+            -name 'libqsql*.so' ! -name 'libqsqlite.so' -delete
 
-      # ========== 准备 AppDir，复制插件（不复制 Qt 库） ==========
-      - name: Prepare AppDir with extra plugins
+      - name: Prepare AppDir（显式部署 Wayland / fcitx5 / GL / Vulkan 相关插件）
         run: |
-          mkdir -p AppDir/usr/share/applications
-          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-          mkdir -p AppDir/usr/plugins
-          mkdir -p AppDir/usr/lib
+          set -euo pipefail
+          QTDIR="${QT_DIR}/${QT_VERSION}/gcc_64"
+          QT_PLUGIN_DIR="$QTDIR/plugins"
+          QT_LIB_DIR="$QTDIR/lib"
+
+          mkdir -p AppDir/usr/bin AppDir/usr/lib AppDir/usr/plugins \
+                   AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
 
           cp packaging/QueMusic.desktop AppDir/usr/share/applications/
           cp resources/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/quemusic.png
 
-          QT_PLUGIN_DIR="$HOME/Qt/6.10.3/gcc_64/plugins"
-
-          # linuxdeploy-plugin-qt 是按「AppDir 内已有库 + 其依赖命中的 Qt 模块」来决定部署内容的，
-          # 平台类插件（platforms / xcbglintegrations / egldeviceintegrations）不保证会被带上，
-          # 所以这里按类别显式拷贝；各插件自身的 .so 依赖仍由 linuxdeploy 解析并补齐。
-
-          # ---- 1) platforms：X11(xcb) + Wayland ----
-          # 只挑 xcb 与 wayland，不整目录拷（避免把 eglfs/linuxfb 依赖的 libgbm/libdrm 拖进包）。
-          # 缺 Wayland 平台插件时 Qt 会退回 XWayland → 分数缩放失效、窗口/字体忽大忽小。
+          # ---- 平台插件：xcb + 全部 wayland ----
           mkdir -p AppDir/usr/plugins/platforms
-          QXCB="$QT_PLUGIN_DIR/platforms/libqxcb.so"
-          [ -f "$QXCB" ] || { echo "!! 缺少 X11 平台插件: $QXCB"; exit 1; }
-          cp -a "$QXCB" AppDir/usr/plugins/platforms/
-          WAYLAND_COUNT=0
+          cp -a "$QT_PLUGIN_DIR/platforms/libqxcb.so" AppDir/usr/plugins/platforms/
           for p in "$QT_PLUGIN_DIR"/platforms/libqwayland*.so; do
-            [ -f "$p" ] || continue
+            [ -e "$p" ] || continue
             cp -a "$p" AppDir/usr/plugins/platforms/
-            WAYLAND_COUNT=$((WAYLAND_COUNT + 1))
           done
-          [ "$WAYLAND_COUNT" -gt 0 ] || {
-            echo "!! 找不到 Wayland 平台插件（aqt 的 linux desktop 基础包应含 qtwayland）"; exit 1; }
-          echo "✅ 平台插件: xcb + ${WAYLAND_COUNT} 个 Wayland 插件"
 
-          # ---- 2) xcbglintegrations：X11/XWayland 下创建 OpenGL 上下文的关键 ----
-          # 缺了它 → 「QRhi 无法加载 OpenGL / 无法创建 OpenGL 上下文」直接闪退。
-          # 而 Vulkan 后端完全不经过这条路径，所以现象是「Vulkan 正常、OpenGL 崩」。
-          XCBGL="$QT_PLUGIN_DIR/xcbglintegrations"
-          [ -d "$XCBGL" ] || { echo "!! 缺少插件目录: $XCBGL"; exit 1; }
-          mkdir -p AppDir/usr/plugins/xcbglintegrations
-          cp -a "$XCBGL"/. AppDir/usr/plugins/xcbglintegrations/
-          echo "✅ xcbglintegrations: $(ls AppDir/usr/plugins/xcbglintegrations | tr '\n' ' ')"
-          [ -f AppDir/usr/plugins/xcbglintegrations/libqxcb-glx-integration.so ] || \
-            echo "⚠️  缺少 libqxcb-glx-integration.so，仅剩 EGL 集成（部分机器 X11 下 OpenGL 仍可能不可用）"
+          # ---- Wayland 子插件（缺了这些 wayland 窗口根本立不起来）----
+          for sub in wayland-shell-integration \
+                     wayland-decoration-client \
+                     wayland-graphics-integration-client; do
+            if [ -d "$QT_PLUGIN_DIR/$sub" ]; then
+              mkdir -p "AppDir/usr/plugins/$sub"
+              cp -a "$QT_PLUGIN_DIR/$sub/." "AppDir/usr/plugins/$sub/"
+            else
+              echo "⚠️ Qt 安装中无 $sub"
+            fi
+          done
 
-          # ---- 3) egldeviceintegrations：EGL 设备/GBM 集成，部分驱动组合需要（缺失只告警）----
+          # ---- X11 上的 GLX / EGL 集成（OpenGL 后端必需）----
+          if [ -d "$QT_PLUGIN_DIR/xcbglintegrations" ]; then
+            mkdir -p AppDir/usr/plugins/xcbglintegrations
+            cp -a "$QT_PLUGIN_DIR/xcbglintegrations/." AppDir/usr/plugins/xcbglintegrations/
+          fi
           if [ -d "$QT_PLUGIN_DIR/egldeviceintegrations" ]; then
             mkdir -p AppDir/usr/plugins/egldeviceintegrations
-            cp -a "$QT_PLUGIN_DIR/egldeviceintegrations"/. AppDir/usr/plugins/egldeviceintegrations/
-            echo "✅ egldeviceintegrations 已拷贝"
+            cp -a "$QT_PLUGIN_DIR/egldeviceintegrations/." AppDir/usr/plugins/egldeviceintegrations/
           fi
 
-          # ---- 4) fcitx5 输入法插件（上一步用同一份 Qt 源码编译，Qt 版本严格匹配）----
+          # ---- fcitx5 输入法插件 + 它自带的 addons 库 ----
           FOUND_FCITX="$(find fcitx5-qt/build -name 'libfcitx5platforminputcontextplugin*.so' -type f | head -n1)"
-          if [ -z "$FOUND_FCITX" ]; then
-            echo "!! 没找到源码编译的 fcitx5 输入法插件（缺它用户无法输入中文）"
-            echo "   请检查上一步 'Build fcitx5 Qt6 input method plugin' 的日志"
-            exit 1
-          fi
+          [ -n "$FOUND_FCITX" ] || { echo "❌ 未找到 fcitx5 插件"; exit 1; }
           mkdir -p AppDir/usr/plugins/platforminputcontexts
-          cp "$FOUND_FCITX" AppDir/usr/plugins/platforminputcontexts/
-          echo "✅ fcitx5 输入法插件（源码编译）: $FOUND_FCITX"
+          cp -aL "$FOUND_FCITX" AppDir/usr/plugins/platforminputcontexts/
+          while IFS= read -r f; do
+            cp -aL "$f" AppDir/usr/lib/
+          done < <(find fcitx5-qt/build \( -name 'libFcitx5Qt6*.so*' -o -name 'libfcitx5-qt*.so*' \))
 
-          # 注意 1：不要手动把宿主系统的 libxcb*/libwayland*/libxkbcommon* 拷进 AppDir。
-          #   这些库必须与用户机器上的 X 服务/compositor 协议版本一致，打进 AppImage 反而会让
-          #   Wayland/X11 在新系统上直接不可用（linuxdeploy 有内置排除表，会自动跳过这类库）。
-          # 注意 2：libGL/libEGL/libGLX/libOpenGL 等图形驱动库同理，必须由用户机器提供。
-          #   打进包里等于把 GL 实现锁死成构建机的 Mesa，在 NVIDIA 或驱动版本不同的机器上
-          #   必然「创建 OpenGL 上下文失败」。
+          # ---- Wayland 客户端库本体（上一版就是漏了这两个）----
+          for lib in libQt6WaylandClient.so.6 libQt6WaylandEglClientHwIntegration.so.6; do
+            if [ -e "$QT_LIB_DIR/$lib" ]; then
+              cp -aL "$QT_LIB_DIR/$lib" AppDir/usr/lib/
+            else
+              echo "❌ Qt 安装缺少 $lib"; exit 1
+            fi
+          done
 
-          echo "✅ AppDir preparation completed."
+          # ---- 协议类宿主库：ABI 稳定，随包带走更保险 ----
+          # 绝不打包：libGL / libEGL / libGLX / libOpenGL / libwayland-egl / libgbm / libvulkan
+          # 这些必须由目标系统提供，否则图形栈被锁死在构建机的 Mesa/驱动上。
+          for lib in libwayland-client.so.0 libwayland-cursor.so.0; do
+            f="$(ls /usr/lib/x86_64-linux-gnu/$lib 2>/dev/null | head -n1)"
+            [ -n "$f" ] && cp -aL "$f" AppDir/usr/lib/ || echo "⚠️ 未找到系统库 $lib"
+          done
+
+          # ---- Qt 自身的 qt.conf，保证即使 QT_PLUGIN_PATH 被覆盖也能找到插件 ----
+          cat > AppDir/usr/bin/qt.conf <<'EOF'
+          [Paths]
+          Prefix = ..
+          Plugins = plugins
+          Qml2Imports = qml
+          EOF
+
+      - name: 依赖补扫（把手工拷贝插件所需的 Qt 库全部拉进 AppDir）
+        run: |
+          set -euo pipefail
+          QT_LIB_DIR="${QT_DIR}/${QT_VERSION}/gcc_64/lib"
+          export LD_LIBRARY_PATH="$QT_LIB_DIR:${LD_LIBRARY_PATH:-}"
+          mkdir -p AppDir/usr/lib
+
+          # 允许随包带走的宿主库白名单（协议/解码/输入法框架，ABI 稳定）
+          allowed() {
+            case "$(basename "$1")" in
+              libwayland-client.so.*|libwayland-cursor.so.*|libxkbcommon.so.*) return 0 ;;
+              libFcitx5*.so.*) return 0 ;;
+              libavcodec.so.*|libavformat.so.*|libavutil.so.*|libswresample.so.*|libswscale.so.*) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          deploy_deps_of() {
+            local target="$1" dep base
+            [ -f "$target" ] || return 0
+            while read -r dep; do
+              [ -n "$dep" ] || continue
+              [ -f "$dep" ] || continue
+              base="$(basename "$dep")"
+              [ -e "AppDir/usr/lib/$base" ] && continue
+              if [ "${dep#"$QT_LIB_DIR"/}" != "$dep" ]; then   # 来自 Qt 安装目录
+                cp -aL "$dep" AppDir/usr/lib/
+              elif allowed "$dep"; then
+                cp -aL "$dep" AppDir/usr/lib/
+              fi
+            done < <(ldd "$target" 2>/dev/null | awk '/=> *\// {print $3}')
+          }
+
+          # 两轮：第一轮扫插件，第二轮扫刚进来的库，覆盖传递依赖
+          for i in 1 2; do
+            while IFS= read -r so; do deploy_deps_of "$so"; done \
+              < <(find AppDir/usr/plugins -name '*.so' -type f)
+            while IFS= read -r so; do deploy_deps_of "$so"; done \
+              < <(find AppDir/usr/lib -maxdepth 1 -name '*.so*' -type f)
+          done
+
+          echo "--- AppDir/usr/lib 中的关键库 ---"
+          ls -1 AppDir/usr/lib | grep -Ei 'wayland|fcitx|xkbcommon' || true
 
       - name: Create custom AppRun script
         run: |
-          cat > AppRun.sh << 'EOF'
+          cat > AppRun.sh <<'EOF'
           #!/bin/bash
-          SELF=$(readlink -f "$0")
-          HERE=${SELF%/*}
-          export PATH="${HERE}/usr/bin/:${HERE}/bin/:${PATH:+:$PATH}"
-          export LD_LIBRARY_PATH="${HERE}/usr/lib/:${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          set -u
+          SELF="$(readlink -f "$0")"
+          HERE="$(dirname "$SELF")"
+
+          export PATH="${HERE}/usr/bin:${HERE}/bin${PATH:+:${PATH}}"
+          export LD_LIBRARY_PATH="${HERE}/usr/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
           export QT_PLUGIN_PATH="${HERE}/usr/plugins"
-          # 平台插件交给 Qt 自动判断：有 Wayland 就用 Wayland，否则回退 X11
-          # （如需强制 X11：QT_QPA_PLATFORM=xcb ./QueMusic-x86_64.AppImage）
-          # 图形后端：Linux 上 Qt 默认走 OpenGL；包内已带 xcbglintegrations，正常情况下可直接用。
-          # 若你的显卡/驱动不支持 OpenGL，可改用 Vulkan：
-          #   QSG_RHI_BACKEND=vulkan ./QueMusic-x86_64.AppImage
-          # 输入法：尊重用户已有设置，缺省 fcitx5（包内已带对应 Qt6 插件）
-          export QT_IM_MODULE="${QT_IM_MODULE:-fcitx}"
+          export QML2_IMPORT_PATH="${HERE}/usr/qml${QML2_IMPORT_PATH:+:${QML2_IMPORT_PATH}}"
+
+          # ---- 平台：优先原生 Wayland，连不上再回落 xcb（不再静默失败）----
+          export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland;xcb}"
+          export QT_WAYLAND_RECONNECT="${QT_WAYLAND_RECONNECT:-1}"
+
+          # ---- 输入法：fcitx5 插件的 key 是 fcitx5，不是 fcitx ----
+          if [ -z "${QT_IM_MODULE:-}" ]; then
+            if command -v fcitx5-remote >/dev/null 2>&1 || pgrep -x fcitx5 >/dev/null 2>&1; then
+              export QT_IM_MODULE=fcitx5
+            else
+              export QT_IM_MODULE=fcitx
+            fi
+          fi
           export XMODIFIERS="${XMODIFIERS:-@im=fcitx}"
-          # 分数缩放（125%/150%）：Qt6 默认把缩放系数取整，会导致窗口忽大忽小
-          export QT_SCALE_FACTOR_ROUNDING_POLICY="${QT_SCALE_FACTOR_ROUNDING_POLICY:-PassThrough}"
-          exec "${HERE}/usr/bin/QueMusic" "$@"
+          export GTK_IM_MODULE="${GTK_IM_MODULE:-fcitx5}"
+
+          # ---- 图形后端 ----
+          # 默认交给 Qt 自动选择（桌面通常 OpenGL / GLES）。
+          # 想跑 Vulkan： ./QueMusic-x86_64.AppImage --vulkan   （等价 QSG_RHI_BACKEND=vulkan）
+          # 排查用： --opengl / --software / --x11 / --wayland / --debug-plugins
+          # 注意：这里不设 QT_SCALE_FALLING_ROUNDING_POLICY=PassThrough，
+          #       它在 XWayland 下会放大缩放取整偏差，导致窗口尺寸异常。
+
+          ARGS=()
+          for arg in "$@"; do
+            case "$arg" in
+              --vulkan)   export QSG_RHI_BACKEND="${QSG_RHI_BACKEND:-vulkan}" ;;
+              --opengl)   export QSG_RHI_BACKEND="${QSG_RHI_BACKEND:-opengl}" ;;
+              --software) export QSG_RHI_BACKEND=software; export LIBGL_ALWAYS_SOFTWARE=1 ;;
+              --x11)      export QT_QPA_PLATFORM=xcb ;;
+              --wayland)  export QT_QPA_PLATFORM=wayland ;;
+              --debug-plugins) export QT_DEBUG_PLUGINS=1 ;;
+              *) ARGS+=("$arg") ;;
+            esac
+          done
+
+          exec "${HERE}/usr/bin/QueMusic" "${ARGS[@]}"
           EOF
           chmod +x AppRun.sh
 
-      # ========== 打包 AppImage（确保使用正确的 Qt 库，并清理多余 SQL 驱动） ==========
       - name: Package AppImage
         run: |
-          export LD_LIBRARY_PATH="$HOME/Qt/6.10.3/gcc_64/lib:$LD_LIBRARY_PATH"
-          export QMAKE="$HOME/Qt/6.10.3/gcc_64/bin/qmake"
+          set -euo pipefail
+          QTDIR="${QT_DIR}/${QT_VERSION}/gcc_64"
+          export LD_LIBRARY_PATH="$QTDIR/lib:${LD_LIBRARY_PATH:-}"
+          export QMAKE="$QTDIR/bin/qmake"
           export QT_QMAKE_EXECUTABLE="$QMAKE"
           export QML_SOURCES_PATHS="$(pwd)"
+          # 注意：是 EXTRA_QT_MODULES（不是 EXTRAQT_MODULES）
           export EXTRA_QT_MODULES="multimedia;sql;shadertools"
+          # Wayland 必须显式告诉 linuxdeploy-plugin-qt，它才会连带部署依赖
+          WP=""
+          for p in "$QTDIR"/plugins/platforms/libqwayland*.so; do
+            [ -e "$p" ] || continue
+            WP="${WP:+$WP;}$(basename "$p")"
+          done
+          export EXTRA_PLATFORM_PLUGINS="$WP"
+          echo "EXTRA_PLATFORM_PLUGINS=$WP"
           export QT_QPA_PLATFORM=minimal
 
-          # 删除 AppDir 中可能遗留的旧 Qt 库（避免版本冲突）
-          rm -f AppDir/usr/lib/libQt6*.so* 2>/dev/null || true
-
-          # 在 Qt 插件目录中删除不需要的 SQL 驱动，只保留 sqlite
-          QT_PLUGIN_DIR="$HOME/Qt/6.10.3/gcc_64/plugins/sqldrivers"
-          if [ -d "$QT_PLUGIN_DIR" ]; then
-            cd "$QT_PLUGIN_DIR"
-            for f in libqsql*.so; do
-              if [ "$f" != "libqsqlite.so" ] && [ -f "$f" ]; then
-                rm -f "$f"
-                echo "Removed $f"
-              fi
-            done
-            cd -
-          fi
-
-          # 运行 linuxdeploy，它会自动部署所有依赖（包括 Qt 库和插件依赖）
           ./linuxdeploy-x86_64.AppImage --appimage-extract-and-run \
             --appdir AppDir \
             --executable build/bin/QueMusic \
@@ -222,69 +313,95 @@ jobs:
             --custom-apprun AppRun.sh \
             --output appimage
 
-          mv QueMusic-*.AppImage QueMusic-x86_64.AppImage 2>/dev/null || true
-          ls -la QueMusic-*.AppImage
+          mv QueMusic-*.AppImage "$APPIMAGE_NAME"
 
-      # 校验门禁：关键插件必须真的在包里，缺任何一个用户侧就是
-      # 「OpenGL 闪退」「Wayland 缩放异常」或「无法输入中文」，所以这里直接让 CI 失败
-      - name: Verify AppImage contents
+      - name: Verify AppImage contents（缺失即失败，不再只 warn）
         run: |
-          ./QueMusic-x86_64.AppImage --appimage-extract > /dev/null
           MISSING=0
-          check() {
-            if ls $2 > /dev/null 2>&1; then
-              echo "✅ $1"
-            else
-              echo "❌ 缺少 $1（无匹配: $2）"
-              MISSING=1
-            fi
-          }
-          warn() {
-            if ls $2 > /dev/null 2>&1; then
-              echo "✅ $1"
-            else
-              echo "⚠️  缺少 $1（无匹配: $2）"
-            fi
-          }
-          check "X11 平台插件 (libqxcb)"   "squashfs-root/usr/plugins/platforms/libqxcb.so"
-          check "Wayland 平台插件"         "squashfs-root/usr/plugins/platforms/libqwayland*.so"
-          check "X11 OpenGL 集成 (GLX)"    "squashfs-root/usr/plugins/xcbglintegrations/libqxcb-glx-integration.so"
-          check "fcitx5 输入法插件"        "squashfs-root/usr/plugins/platforminputcontexts/*fcitx5*.so"
-          check "SQLite 驱动"              "squashfs-root/usr/plugins/sqldrivers/libqsqlite.so"
-          warn  "X11 EGL 集成"             "squashfs-root/usr/plugins/xcbglintegrations/libqxcb-egl-integration.so"
-          warn  "Wayland 客户端库"         "squashfs-root/usr/lib/libQt6WaylandClient.so*"
-          warn  "Wayland EGL 客户端集成"   "squashfs-root/usr/lib/libQt6WaylandEglClientHwIntegration.so*"
+          ./"$APPIMAGE_NAME" --appimage-extract > /dev/null
+          R="squashfs-root"
 
-          # 宿主提供的图形/compositor 库不该出现在包里（出现会把 GL 锁死到构建机的 Mesa）
-          for bad in libGL.so* libEGL.so* libGLX.so* libOpenGL.so* libwayland-client.so* libwayland-egl.so*; do
-            if ls squashfs-root/usr/lib/$bad > /dev/null 2>&1; then
-              echo "⚠️  包内含宿主驱动库 $bad（可能导致部分发行版上 OpenGL/Wayland 失效）"
-            fi
-          done
-          exit $MISSING
+          check() { if ls $2 > /dev/null 2>&1; then echo "✅ $1"; else echo "❌ 缺少 $1（无匹配: $2）"; MISSING=1; fi; }
+          absent() {
+            local label="$1" hit=0 pat
+            shift
+            for pat in "$@"; do
+              if ls $pat > /dev/null 2>&1; then
+                echo "❌ 不应打包 $label：$pat（会把图形栈锁死在构建机驱动上）"; MISSING=1; hit=1
+              fi
+            done
+            [ "$hit" -eq 0 ] && echo "✅ 未打包 $label"
+            return 0
+          }
 
-      - name: Upload AppImage artifact
+          check "X11 平台插件 (libqxcb)"                 "$R/usr/plugins/platforms/libqxcb.so"
+          check "Wayland 平台插件"                        "$R/usr/plugins/platforms/libqwayland*.so"
+          check "Wayland shell 集成 (xdg-shell)"          "$R/usr/plugins/wayland-shell-integration/libxdg-shell.so"
+          check "Wayland 图形集成客户端"                   "$R/usr/plugins/wayland-graphics-integration-client/*.so"
+          check "X11 GLX 集成 (OpenGL)"                  "$R/usr/plugins/xcbglintegrations/libqxcb-glx-integration.so"
+          check "X11 EGL 集成 (OpenGL ES)"               "$R/usr/plugins/xcbglintegrations/libqxcb-egl-integration.so"
+          check "fcitx5 输入法插件"                       "$R/usr/plugins/platforminputcontexts/*fcitx5*.so"
+          check "SQLite 驱动"                            "$R/usr/plugins/sqldrivers/libqsqlite.so"
+          check "Wayland 客户端库"                        "$R/usr/lib/libQt6WaylandClient.so*"
+          check "Wayland EGL 客户端集成"                   "$R/usr/lib/libQt6WaylandEglClientHwIntegration.so*"
+          check "fcitx5 addons 库"                       "$R/usr/lib/libFcitx5Qt6DBusAddons.so*"
+          check "Wayland 协议库"                          "$R/usr/lib/libwayland-client.so*"
+          check "Qt OpenGL 模块"                         "$R/usr/lib/libQt6OpenGL.so*"
+
+          absent "宿主图形驱动库" \
+            "$R/usr/lib/libGL.so*"  "$R/usr/lib/libEGL.so*" \
+            "$R/usr/lib/libGLX.so*" "$R/usr/lib/libOpenGL.so*" \
+            "$R/usr/lib/libgbm.so*" "$R/usr/lib/libwayland-egl.so*"
+
+          # Vulkan：QtGui 自带 RHI，只需确认 libvulkan 没被塞进包（必须由宿主提供）
+          if strings "$R/usr/lib/libQt6Gui.so.6" 2>/dev/null | grep -qi vulkan; then
+            echo "✅ QtGui 具备 Vulkan RHI"
+          else
+            echo "❌ QtGui 未检出 Vulkan 支持"; MISSING=1
+          fi
+          if ls "$R"/usr/lib/libvulkan.so* > /dev/null 2>&1; then
+            echo "⚠️  包内含有 libvulkan（建议移除，使用宿主的 loader + ICD）"
+          else
+            echo "✅ 未打包 libvulkan（将使用宿主 loader）"
+          fi
+
+          # 依赖完整性：任何 Qt / fcitx / wayland 依赖缺失都直接判失败
+          export LD_LIBRARY_PATH="$PWD/$R/usr/lib:${LD_LIBRARY_PATH:-}"
+          echo "--- 依赖完整性扫描 ---"
+          while IFS= read -r so; do
+            miss="$(ldd "$so" 2>/dev/null | awk '/not found/{print $1}' | sort -u || true)"
+            [ -n "$miss" ] || continue
+            while IFS= read -r m; do
+              [ -n "$m" ] || continue
+              case "$m" in
+                libQt6*|libFcitx5*|libfcitx5*|libwayland-client*|libwayland-cursor*|libxkbcommon*|libav*|libsw*)
+                  echo "❌ $(basename "$so") → 缺失 $m"; MISSING=1 ;;
+                *)
+                  echo "⚠️  $(basename "$so") → 缺失 $m（由宿主提供，忽略）" ;;
+              esac
+            done <<< "$miss"
+          done < <(find "$R/usr/plugins" "$R/usr/lib" -maxdepth 2 -name '*.so*' -type f)
+
+          [ "$MISSING" -eq 0 ] || { echo "::error::AppImage 校验未通过，终止发布"; exit 1; }
+          echo "🎉 全部校验通过"
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: QueMusic-x86_64.AppImage
-          path: QueMusic-x86_64.AppImage
+          name: QueMusic-Linux-AppImage
+          path: ${{ env.APPIMAGE_NAME }}
 
-      - name: Check if release tag already exists (manual trigger only)
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != ''
+      # ↓↓↓ 发布段沿用你原来的逻辑，不需要可直接删除 ↓↓↓
+      - name: Create Release & upload AppImage
+        if: ${{ github.event_name == 'push' || inputs.release_tag != '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.event.inputs.release_tag }}"
-          if gh release view "$TAG" &>/dev/null; then
-            echo "❌ Error: Release tag '$TAG' already exists. Please choose a different tag."
-            exit 1
+          set -euo pipefail
+          TAG="${{ inputs.release_tag }}"
+          [ -n "$TAG" ] || TAG="${GITHUB_REF_NAME}"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "❌ Release tag '$TAG' 已存在，请换一个 tag。"; exit 1
           fi
-          echo "✅ Tag '$TAG' is available."
-
-      - name: Create Release and upload AppImage
-        if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.release_tag != ''
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.event.inputs.release_tag }}
-          files: QueMusic-x86_64.AppImage
-          generate_release_notes: false
+          gh release create "$TAG" --title "QueMusic $TAG" --generate-notes
+          gh release upload "$TAG" "$APPIMAGE_NAME" --clobber

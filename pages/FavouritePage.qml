@@ -35,8 +35,6 @@ Item {
     QMenu {
         id: sortMenu
         model: favSortOptions.map(o => o.label)
-        blurSource: null
-        masked: true
         current: favouriteChildPage.lastIndex === 0 ? songSort.menuIndex : listSort.menuIndex
         onClicked: (i) => {
             const target = favouriteChildPage.lastIndex === 0 ? songSort : listSort;

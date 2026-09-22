@@ -222,6 +222,8 @@ SongModel::~SongModel()
         m_enrichWorker->generation.fetch_add(1);
         m_enrichThread.quit();
         m_enrichThread.wait();
+        delete m_enrichWorker;
+        m_enrichWorker = nullptr;
     }
     if (m_searchTimer)
         m_searchTimer->stop();

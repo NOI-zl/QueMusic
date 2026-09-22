@@ -1,4 +1,3 @@
-// QBlurTapBar.qml
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-2026 QueMusic Contributors
 //
@@ -31,7 +30,6 @@ Item {
     readonly property int _texW: Math.max(2, Math.round(root.width  * Screen.devicePixelRatio))
     readonly property int _texH: Math.max(2, Math.round(root.height * Screen.devicePixelRatio))
 
-    // 捕获背景内容
     ShaderEffectSource {
         id: effectSource
         anchors.fill: parent
@@ -39,6 +37,7 @@ Item {
         sourceRect: root.rectXy
         textureSize: Qt.size(root._texW, root._texH)
         mipmap: true
+        live: root.visible && root.blurSource !== null
         visible: false
     }
 

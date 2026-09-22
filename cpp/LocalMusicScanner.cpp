@@ -166,6 +166,8 @@ LocalMusicScanner::~LocalMusicScanner()
     m_worker->generation.fetch_add(1);
     m_thread.quit();
     m_thread.wait();
+    delete m_worker;
+    m_worker = nullptr;
 }
 
 int LocalMusicScanner::rowCount(const QModelIndex &parent) const
@@ -318,6 +320,12 @@ void LocalMusicScanner::startScan()
         emit scanningChanged();
     }
     QMetaObject::invokeMethod(m_worker, "run", Qt::QueuedConnection);
+}
+
+void LocalMusicScanner::rescan()
+{
+    if (!m_folder.isEmpty())
+        startScan();
 }
 
 void LocalMusicScanner::deleteFiles(const QVariantList &paths)

@@ -1,4 +1,3 @@
-// QBigDrop.qml
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-2026 QueMusic Contributors
 //
@@ -21,7 +20,6 @@ Rectangle {
         y: 0
         width: root.width - 16
         height: root.height
-        property int choiceIndex: 0
         spacing: 16
         Repeater {
             model: root.model
@@ -51,6 +49,7 @@ Rectangle {
                     height: 64
                     width: root.singleWidth - 32
                     sourceSize: Qt.size(64,64)
+                    asynchronous: true
                     fillMode: Image.PreserveAspectFit
                 }
             

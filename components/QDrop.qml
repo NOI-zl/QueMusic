@@ -1,10 +1,8 @@
-// QDrop.qml
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-2026 QueMusic Contributors
 //
 import QtQuick
 import QueMusic 1.0
-import QtQuick.Layouts
 import QtQuick.Controls.Basic
 import QtQuick.Effects
 
@@ -17,9 +15,7 @@ Rectangle {
     color: Style.themes.primaryColor
     border.width: 2
     border.color: Style.themes.borderColor
-    // useId 模式下文本取自 model[choice].description，这里不做多余转换：
-    // 直接把 QAudioDevice 之类的对象赋给 string 会产生 "Unable to assign ... to QString" 警告，
-    // 越界时也不再得到字符串 "undefined"
+    // useId 模式下文本取自 model[choice].description；对象直接赋给 string 会产生 QML 类型警告
     property string text: (!useId && model && model[choice] !== undefined) ? String(model[choice]) : ""
     property bool useId: false
     property string icon: "\uf096"
@@ -77,7 +73,6 @@ Rectangle {
         enabled: root.enabled
         hoverEnabled: true
         onClicked: {
-            if(root)
             if(popmenu.visible) {
                 popmenu.close();
             } else {

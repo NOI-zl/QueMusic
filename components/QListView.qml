@@ -3,6 +3,7 @@
 //
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Effects
 import QueMusic 1.0
 
 ListView {
@@ -10,6 +11,7 @@ ListView {
     topMargin: 6
     bottomMargin: 24
     rightMargin: 16
+    acceptedButtons: Qt.NoButton
     property int scrollToY: view.contentY
     property list<string> headerModel: isList ? ["标题","创建者","曲目","操作"] : ["标题","歌手","时长","操作"]
     property list<string> menuModel: ["下载到本地","分享","歌曲信息"]
@@ -59,14 +61,21 @@ ListView {
         parent: Overlay.overlay
         property int index
 
-        background: QBlurCard {
-            implicitWidth: 150
+        background: Rectangle {
+            implicitWidth: 160
             implicitHeight: 40
-            shadowEffect: true
-            blurSource: mainLayout
-            rectXy: Qt.rect(menu.x, menu.y, menu.width, menu.height)
-            cardColor: Style.themes.blurSecondaryColor
-            borderRadius: Style.settings.labelRadius
+            color: Style.settings.primaryColor
+            radius: Style.settings.labelRadius
+            RectangularShadow {
+                anchors.fill: parent
+                z: -1
+                offset.x: 0
+                offset.y: 5
+                radius: parent.radius
+                blur: 20
+                spread: 0
+                color: Style.themes.shadowColor
+            }
         }
 
         Instantiator {
@@ -129,6 +138,7 @@ ListView {
             listViewAnime.running = true;
         }
     }
+
     NumberAnimation {
         id: listViewAnime
         target: view
@@ -139,19 +149,11 @@ ListView {
         onFinished: viewBar.active = false
     }
 
-    rebound: Transition {
-        NumberAnimation {
-            properties: "y"
-            duration: 420
-            easing.type: Easing.Bezier
-            easing.bezierCurve: [ 0.16, 0.03, 0.00, 1.00, 1, 1 ]
-        }
-    }
     header: Item {
         width: view.width
         height: 36
         Text {
-            x: 80
+            x: 76
             height: 36
             text: view.headerModel[0]
             color: Style.themes.textColor
@@ -190,7 +192,12 @@ ListView {
         id: listDisplacedAnime
         SequentialAnimation {
             PauseAnimation {
-                duration: (listDisplacedAnime.ViewTransition.index - listDisplacedAnime.ViewTransition.targetIndexes[0]) * 40
+                duration: {
+                    const vt = listDisplacedAnime.ViewTransition;
+                    const ti = vt.targetIndexes;
+                    const base = (ti && ti.length > 0) ? ti[0] : vt.index;
+                    return Math.min(Math.abs(vt.index - base), 8) * 30;
+                }
             }
             NumberAnimation {
                 properties: "y"
@@ -220,13 +227,16 @@ ListView {
 
     delegate: Rectangle {
         id: listDel
-        //required property int index
         height: 60
         width: view.width - 16
         color: view.selectedSet.has(index) ? Style.themes.containColor : "#00000000"
         radius: Style.settings.labelRadius
         property int transY: 0
         transform: Translate { y: listDel.transY }
+
+        // reuseItems 下非 model 提供的属性不会随复用自动恢复，按官方建议手动复位
+        ListView.onReused: { listDel.transY = 0; listDel.opacity = 1; }
+        ListView.onPooled: { listDel.transY = 0; listDel.opacity = 1; }
 
         Rectangle {
             anchors.fill: parent
@@ -242,13 +252,13 @@ ListView {
             width: 44
             height: 44
             radius: 10
-            source: model.cover.replace("{size}","64") || "qrc:/QueMusic/resources/app/musicpic.png"
+            source: (model.cover || "").replace("{size}","64") || "qrc:/QueMusic/resources/app/musicpic.png"
         }
 
 
         Text {
             id: title
-            x: 80
+            x: 76
             y: 16
             width: view.artistX - 110
             height: 28

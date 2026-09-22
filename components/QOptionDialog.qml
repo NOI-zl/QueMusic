@@ -4,16 +4,14 @@
 import QtQuick
 import QueMusic 1.0
 import QtQuick.Controls.Basic
-import QtQuick.Layouts
-import QtQuick.Effects
 import 'qrc:/QueMusic/components'
-    // 毛玻璃对话框主体
 Popup {
     id: dialog
     property Item blurSource: mainLayout // 使用父内容作为模糊源
     property rect rectXy: Qt.rect(dialog.x, dialog.y, dialog.width, dialog.height)
     property alias title: titleText.text
-    default property alias options: dialogContent.contentChildren
+    //default property alias options: dialogContent.data
+    property Component options
     property string cancelText: ""
     property string cancelIcon: "\uf10f"
     property string confirmText: "完成"
@@ -58,12 +56,25 @@ Popup {
             wrapMode: Text.WordWrap
         }
 
-        ScrollView {
+        Flickable {
             id: dialogContent
             width: contentCol.width + 10
             height: contentHeight > window.height - 320 ? window.height - 320 : contentHeight
-            contentWidth: contentCol.width
+            contentHeight: contentItem.childrenRect.height
+            contentWidth: width - 10
+            boundsBehavior: Flickable.StopAtBounds
             clip: true
+            synchronousDrag: true
+            ScrollBar.vertical: ScrollBar {
+                anchors.right: dialogContent.right
+                //anchors.rightMargin: 10
+                anchors.top: dialogContent.top
+                anchors.bottom: dialogContent.bottom
+            }
+            Component.onCompleted: {
+                const component = dialog.options
+                component.createObject(dialogContent.contentItem);
+            }
         }
 
         Row {

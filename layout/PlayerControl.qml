@@ -100,20 +100,6 @@ Rectangle {
                 mainMedia.position = value
             }
 
-            // 可选：在滑块手柄上显示预览时间
-            ToolTip {
-                parent: progressSlider.handle
-                visible: progressSlider.hovered
-                text: musicControlMin.mediaTime
-                horizontalPadding: 8
-                background: Rectangle {
-                    anchors.fill: parent
-                    color: Style.themes.fullColor
-                    border.width: 1
-                    radius: height
-                    border.color: Style.themes.sideColor
-                }
-            }
             // 背景轨道
             background: Rectangle {
                 y: progressSlider.hovered ? 8 : 10
@@ -141,6 +127,19 @@ Rectangle {
                 color: "#ffffff"
                 border.color: Style.themes.themeColor
                 border.width: 2.5
+                ToolTip {
+                    //parent: progressSlider.handle
+                    //visible: progressSlider.hovered || progressSlider.pressed
+                    text: musicControlMin.mediaTime
+                    horizontalPadding: 8
+                    background: Rectangle {
+                        anchors.fill: parent
+                        color: Style.themes.fullColor
+                        border.width: 1
+                        radius: height
+                        border.color: Style.themes.sideColor
+                    }
+                }
             }
         }
     }
@@ -162,7 +161,7 @@ Rectangle {
             width: 128
             elide: Text.ElideRight
             height: 25
-            text: window.musicTitle
+            text: Playback.musicTitle
             font.bold: true
             font.pixelSize: 15
             verticalAlignment: Text.AlignVCenter
@@ -177,7 +176,7 @@ Rectangle {
                 onClicked: (mouse) => {
                     if (mouse.button === Qt.RightButton) {
                         // 右键保留原有搜索菜单
-                        if(!window.musicTitle)  return;
+                        if(!Playback.musicTitle)  return;
                         titleMenu.popup();
                         return;
                     }
@@ -199,10 +198,8 @@ Rectangle {
             QMenu {
                 id: titleMenu
                 model: ["搜索歌曲名"]
-                masked: true
-                blurSource: null // 位置特殊，关闭模糊效果
                 onClicked: (index) => {
-                    musicControlMin.doSearchSongsMessage(window.musicTitle);
+                    musicControlMin.doSearchSongsMessage(Playback.musicTitle);
                 }
             }
         }
@@ -213,7 +210,7 @@ Rectangle {
             width: 128
             elide: Text.ElideRight
             height: 25
-            text: window.musicArtist
+            text: Playback.musicArtist
             font.bold: false
             font.pixelSize: 13
             verticalAlignment: Text.AlignVCenter
@@ -228,8 +225,8 @@ Rectangle {
                 onClicked: (mouse) => {
                     if (mouse.button === Qt.RightButton) {
                         // 右键保留原有搜索菜单（多歌手选择）
-                        if(!window.musicArtist)  return; //本地音乐没有歌手信息时，忽略
-                        const artists = musicControlMin.parseArtists(window.musicArtist);
+                        if(!Playback.musicArtist)  return; //本地音乐没有歌手信息时，忽略
+                        const artists = musicControlMin.parseArtists(Playback.musicArtist);
                         artistMenu.model = artists;// 多歌手,弹菜单
                         artistMenu.popup();
                         return;
@@ -252,11 +249,9 @@ Rectangle {
             QMenu {
                 id: artistMenu
                 model: []
-                masked: true
-                blurSource: null // 位置特殊，关闭模糊效果
                 onClicked: (index) => {
                     if(index === 0) {
-                        musicControlMin.doSearchSongsMessage(window.musicArtist);
+                        musicControlMin.doSearchSongsMessage(Playback.musicArtist);
                     } else {
                         musicControlMin.doSearchSongsMessage(model[index]);
                     }
@@ -283,7 +278,7 @@ Rectangle {
                         mainWarn.tiped("取消收藏",0);
                         iconColor = Style.themes.textColor;
                     } else {
-                        FavoriteSongs.addFavorite(playListModel.get(playListModel.playListIndex).path, window.musicTitle, window.musicArtist, mainMedia.urlStr, playListModel.get(playListModel.playListIndex).source, Math.floor(mainMedia.duration / 1000), "song");
+                        FavoriteSongs.addFavorite(playListModel.get(playListModel.playListIndex).path, Playback.musicTitle, Playback.musicArtist, mainMedia.urlStr, playListModel.get(playListModel.playListIndex).source, Math.floor(mainMedia.duration / 1000), "song");
                         mainWarn.tiped("成功收藏",1);
                         iconColor = Style.themes.themeColor;
                     }
@@ -352,7 +347,7 @@ Rectangle {
             iconColor: Style.themes.textColor
             iconSize: Style.settings.texticonH
             shadowEnabled: false
-            onClicked: musicControlMin.lastMedia()
+            onClicked: Playback.previous()
             tipText: "上一首"
         }
         SButton {
@@ -378,7 +373,7 @@ Rectangle {
             iconColor: Style.themes.textColor
             iconSize: Style.settings.texticonH
             shadowEnabled: false
-            onClicked: musicControlMin.enterMedia()
+            onClicked: Playback.next(false)
             tipText: "下一首"
         }
         SButton {
@@ -541,7 +536,7 @@ Rectangle {
             likeButton.iconColor = Style.themes.textColor;
             mainWarn.tiped("取消收藏", 0);
         } else {
-            FavoriteSongs.addFavorite(e.path, window.musicTitle, window.musicArtist, mainMedia.urlStr,
+            FavoriteSongs.addFavorite(e.path, Playback.musicTitle, Playback.musicArtist, mainMedia.urlStr,
                                       e.source, Math.floor(mainMedia.duration / 1000), "song");
             likeButton.iconColor = Style.themes.themeColor;
             mainWarn.tiped("成功收藏", 1);

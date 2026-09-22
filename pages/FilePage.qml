@@ -815,8 +815,6 @@ Item {
                 id: songSortMenu
                 model: songSort.options.map(o => o.label)
                 current: songSort.menuIndex
-                blurSource: null
-                masked: true
                 onClicked: (i) => {
                     songSort.selectMenu(i);
                     songSearchSort.selectMenu(i);
@@ -980,19 +978,21 @@ Item {
                 height: folderMusic.height - 128
                 model: folderMusic.searching ? songSearchSort : songSort
                 clip: true
-                reuseItems: true
+                reuseItems: false
                 headerModel: ["标题","歌手","","菜单"]
                 property int transY: 0
                 transform: Translate { y: fileView.transY }
                 populate: Transition {
                     id: localFileLoadAnime2
                     SequentialAnimation {
-                        PropertyAction {
-                            property: "opacity"
-                            value: 0
-                        }
-                        PauseAnimation {
-                            duration: localFileLoadAnime2.ViewTransition.index * 40
+                        // 顶住透明度用 NumberAnimation(0→0) 而不是 PropertyAction：
+                        // PropertyAction 是真的把属性写成 0，被打断/回收时会残留成永久 0。
+                        // 交错时长封顶，避免几百行时十几秒的滞留。
+                        NumberAnimation {
+                            properties: "opacity"
+                            from: 0
+                            to: 0
+                            duration: Math.min(localFileLoadAnime2.ViewTransition.index, 12) * 40
                         }
                         ParallelAnimation {
                             NumberAnimation {
@@ -1021,6 +1021,10 @@ Item {
                     color: listfile.chosen || mainMedia.source == model.path ? Style.themes.containColor : "transparent"
                     property int transY: 0
                     transform: Translate { y: listfile.transY }
+
+                    // reuseItems 下非 model 提供的属性不会随复用自动恢复，按官方建议手动复位
+                    ListView.onReused: { listfile.transY = 0; listfile.opacity = 1; }
+                    ListView.onPooled: { listfile.transY = 0; listfile.opacity = 1; }
 
                     readonly property string coverUrl: {
                         if (model.tagCoverUrl !== "") return model.tagCoverUrl;
@@ -1089,7 +1093,7 @@ Item {
                                 filePage.toggleChoose(model.songId);
                                 return;
                             }
-                            window.playLocalSong(model.path, listfile.songTitle);
+                            Playback.playLocalSong(model.path, listfile.songTitle);
                             const musicName = listfile.songTitle;
                             const musicPath = model.path;
                             const listIndex = playListModel.indexOfName(musicName);
@@ -1173,8 +1177,6 @@ Item {
             QMenu {
                 id: localSortMenu
                 model: localSortOptions.map(o => o.label)
-                blurSource: null
-                masked: true
                 current: filePage.localSortMenuIndex
                 onClicked: (i) => {
                     filePage.localSortField = localSortOptions[i].field;
@@ -1225,9 +1227,7 @@ Item {
                         localFileModel.clearSearch();
                         localFolderMusic.searching = false;
                         filterInput2.text = "";
-                        const folder = localFileModel.folder;
-                        localFileModel.folder = "";
-                        localFileModel.folder = folder;
+                        localFileModel.rescan();
                         localFileView.scrollTop();
                         Style.warned("已刷新当前列表", 1);
                     }
@@ -1339,17 +1339,19 @@ Item {
                 height: localFolderMusic.height - 128
                 model: localFolderMusic.searching ? localFileModel.searchResults : localFileModel
                 clip: true
-                reuseItems: true
+                reuseItems: false
                 headerModel: ["标题","歌手","","菜单"]
                 populate: Transition {
                     id: localFileLoadAnime
                     SequentialAnimation {
-                        PropertyAction {
-                            property: "opacity"
-                            value: 0
-                        }
-                        PauseAnimation {
-                            duration: localFileLoadAnime.ViewTransition.index * 40
+                        // 顶住透明度用 NumberAnimation(0→0) 而不是 PropertyAction：
+                        // PropertyAction 是真的把属性写成 0，被打断/回收时会残留成永久 0。
+                        // 交错时长封顶，避免几百行时十几秒的滞留。
+                        NumberAnimation {
+                            properties: "opacity"
+                            from: 0
+                            to: 0
+                            duration: Math.min(localFileLoadAnime.ViewTransition.index, 12) * 40
                         }
                         ParallelAnimation {
                             NumberAnimation {
@@ -1378,6 +1380,10 @@ Item {
                     color: listLocalFile.chosen || mainMedia.source == model.fileUrl ? Style.themes.containColor : "transparent"
                     property int transY: 0
                     transform: Translate { y: listLocalFile.transY }
+
+                    // reuseItems 下非 model 提供的属性不会随复用自动恢复，按官方建议手动复位
+                    ListView.onReused: { listLocalFile.transY = 0; listLocalFile.opacity = 1; }
+                    ListView.onPooled: { listLocalFile.transY = 0; listLocalFile.opacity = 1; }
 
                     readonly property string rowPath: model.fileUrl ? model.fileUrl.toString() : ""
                     readonly property string coverUrl: {
@@ -1448,7 +1454,7 @@ Item {
                                 filePage.toggleChoose(model.fileUrl.toString());
                                 return;
                             }
-                            window.playLocalSong(model.fileUrl.toString(), listLocalFile.songTitle);
+                            Playback.playLocalSong(model.fileUrl.toString(), listLocalFile.songTitle);
                             const musicName = listLocalFile.songTitle;
                             const musicPath = model.fileUrl.toString();
                             const listIndex = playListModel.indexOfName(musicName);

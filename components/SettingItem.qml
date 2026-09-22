@@ -3,7 +3,6 @@
 //
 import QtQuick
 import QueMusic 1.0
-import QtQuick.Layouts
 
 Item {
     id: settingItem

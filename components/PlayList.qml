@@ -8,7 +8,7 @@ import QtQuick.Controls.Basic
 // 播放列表
 Popup {
     id: playList
-    // 列表中： source：-1：本地 0.酷狗 1.网易云 2.qq音乐
+    // 列表中： source：-1：本地 0.酷狗 1.网易云 2.哔哩哔哩 3.qq音乐
     property alias model: playListView.model
     property string filter: ""
 
@@ -240,14 +240,9 @@ Popup {
                     onEntered: listHover.opacity = 1
                     onExited: listHover.opacity = 0
                     onClicked: {
-                        if (model.source == -1) {
-                            playListModel.playListIndex = index
-                            window.playLocalSong(model.path, model.name)
-                        } else {
-                            mainMedia.urlLocal = false
-                            playListModel.playListIndex = index
-                            MusicApi.getMusicInfo(model.path, 0, model.source)
-                        }
+                        playListModel.playListIndex = index
+                        if (model.source < 0) Playback.playLocalSong(model.path, model.name)
+                        else MusicApi.getMusicInfo(model.path, 0, model.source)
                     }
 
                     Rectangle {

@@ -49,12 +49,23 @@ Popup {
                 root.close()
             }
         }
-
-        ScrollView {
+        Flickable {
+            id: view
             x: 16
             y: 60
-            width: root.width - 32
+            width: root.width - 22
             height: root.height - 60
+            contentHeight: contentItem.childrenRect.height
+            contentWidth: width - 12
+            boundsBehavior: Flickable.StopAtBounds
+            clip: true
+            synchronousDrag: true
+            ScrollBar.vertical: ScrollBar {
+                anchors.right: view.right
+                //anchors.rightMargin: 10
+                anchors.top: view.top
+                anchors.bottom: view.bottom
+            }
             Column {
                 id: desktopSet
                 width: root.width - 32
@@ -69,13 +80,13 @@ Popup {
                         height: 112
                         MouseArea {
                             anchors.fill: parent
-                            onClicked: picWatch.dialog(mainMedia.urlStr || "qrc:/QueMusic/resources/app/musicpic.png",window.musicTitle);
+                            onClicked: picWatch.dialog(mainMedia.urlStr || "qrc:/QueMusic/resources/app/musicpic.png",Playback.musicTitle);
                         }
                     }
                     Text {
                         x: 128
                         y: 8
-                        text: window.musicTitle
+                        text: Playback.musicTitle
                         font.pixelSize: 18
                         font.bold: true
                         width: parent.width - 128
@@ -85,7 +96,7 @@ Popup {
                     Text {
                         x: 128
                         y: 42
-                        text: window.musicArtist
+                        text: Playback.musicArtist
                         font.pixelSize: 16
                         width: parent.width - 128
                         elide: Text.ElideRight
@@ -116,7 +127,7 @@ Popup {
                         height: 36
                         anchors.right: parent.right
                         font.pixelSize: Style.settings.textmain
-                        text: window.musicTitle
+                        text: Playback.musicTitle
                         color: Style.themes.textColor
                         readOnly: true
                         selectByMouse: true
@@ -132,7 +143,7 @@ Popup {
                         height: 36
                         anchors.right: parent.right
                         font.pixelSize: Style.settings.textmain
-                        text: window.musicArtist
+                        text: Playback.musicArtist
                         color: Style.themes.textColor
                         readOnly: true
                         selectByMouse: true

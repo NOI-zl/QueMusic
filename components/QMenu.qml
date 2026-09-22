@@ -3,16 +3,11 @@
 //
 import QtQuick
 import QueMusic 1.0
-import QtQuick.Controls.Basic
-import QtQuick.Layouts
 import QtQuick.Effects
+import QtQuick.Controls.Basic
 import 'qrc:/QueMusic/components'
-    // 毛玻璃对话框主体
 Menu {
     id: dialog
-    property Item blurSource: mainLayout // 使用父内容作为模糊源
-    property rect rectXy: Qt.rect(dialog.x, dialog.y, dialog.width, dialog.height)
-    property bool masked: false
     property int current: -1
     title: "Menu"
     parent: Overlay.overlay
@@ -20,14 +15,21 @@ Menu {
     signal clicked(int index)
 
 
-    background: QBlurCard {
-        implicitWidth: 150
+    background: Rectangle {
+        implicitWidth: 160
         implicitHeight: 40
-        shadowEffect: true
-        blurSource: dialog.blurSource
-        masked: dialog.masked
-        rectXy: dialog.rectXy
-        borderRadius: Style.settings.labelRadius
+        color: Style.settings.primaryColor
+        radius: Style.settings.labelRadius
+        RectangularShadow {
+            anchors.fill: parent
+            z: -1
+            offset.x: 0
+            offset.y: 5
+            radius: parent.radius
+            blur: 20
+            spread: 0
+            color: Style.themes.shadowColor
+        }
     }
 
     Instantiator {

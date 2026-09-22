@@ -27,14 +27,6 @@ Flickable {
             view.scrollToY = view.contentY;
         }
     }
-    rebound: Transition {
-        NumberAnimation {
-            properties: "y"
-            duration: 420
-            easing.type: Easing.Bezier
-            easing.bezierCurve: [ 0.16, 0.03, 0.00, 1.00, 1, 1 ]
-        }
-    }
 
     WheelHandler {
         acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
@@ -47,6 +39,7 @@ Flickable {
             viewAnime.running = true;
         }
     }
+
     NumberAnimation {
         id: viewAnime
         target: view

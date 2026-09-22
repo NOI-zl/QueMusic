@@ -4,8 +4,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QueMusic 1.0
-import QtCore
-import Qt.labs.folderlistmodel
 import 'qrc:/QueMusic/components'
 
 Item {
@@ -368,7 +366,7 @@ Item {
                     const item = downloadedModel.get(index);
                     if (!item || !item.fileUrl)
                         return;
-                    window.playLocalSong(item.fileUrl, item.fileName);
+                    Playback.playLocalSong(item.fileUrl, item.fileName);
 
                     const listIndex = playListModel.indexOfPath(item.fileUrl);
                     if (listIndex === -1) {

@@ -130,12 +130,6 @@ int main(int argc, char *argv[])
     if (opt.value(QStringLiteral("Options/qmlAnimator"), 0).toBool() == false)
         qputenv("QSG_USE_SIMPLE_ANIMATION_DRIVER", "1");
 
-    // Qt RHI: scene graph 调试
-    //qputenv("QSG_RENDER_TIMING", "1");
-    //qputenv("QSG_INFO", "1");
-    //qputenv("QSG_RENDERER_DEBUG", "render");
-    //qputenv("QT_LOGGING_RULES", "qt.scenegraph.time.renderloop=true");
-
     QApplication::setHighDpiScaleFactorRoundingPolicy(
         Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
     // QApplication（而非 QGuiApplication）：托盘图标与原生托盘菜单依赖 QtWidgets
@@ -144,7 +138,6 @@ int main(int argc, char *argv[])
     application.setQuitOnLastWindowClosed(false);
 
     QQuickWindow::setDefaultAlphaBuffer(true);
-    //QQuickWindow::setTextRenderType(QQuickWindow::CurveTextRendering);
     QQmlApplicationEngine engine;
 
     // 显式注册QML_ELEMENT 类型

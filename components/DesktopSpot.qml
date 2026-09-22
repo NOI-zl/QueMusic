@@ -80,7 +80,7 @@ Window {
             y: 8
             width: spotCard.width - 96
             height: 32
-            text: window.musicTitle
+            text: Playback.musicTitle
             color: "white"
             font.pixelSize: 13
             clip: true
@@ -161,7 +161,7 @@ Window {
                 iconColor: Style.themes.primaryColor
                 iconSize: Style.settings.texticon
                 shadowEnabled: false
-                onClicked: musicControlMin.lastMedia()
+                onClicked: Playback.previous()
             }
 
             SButton {
@@ -176,7 +176,7 @@ Window {
                 iconColor: Style.themes.primaryColor
                 iconSize: Style.settings.texticon
                 shadowEnabled: false
-                onClicked: musicControlMin.enterMedia()
+                onClicked: Playback.next(false)
             }
         }
 

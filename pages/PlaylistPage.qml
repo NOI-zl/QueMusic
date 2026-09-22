@@ -50,12 +50,12 @@ Item {
                 height: 36; width: 120
                 anchors.right: parent.right
                 choice: MusicApi.songSource
-                textColor: MusicApi.songSource == 0 ? "#0F3975" : MusicApi.songSource == 1 ? "#750F0F" : MusicApi.songSource == 2 ? "#16750F" : "#756F0F"
-                color: MusicApi.songSource == 0 ? "#CDE8FF" : MusicApi.songSource == 1 ? "#FFCDCD" : MusicApi.songSource == 2 ? "#CDFFCD" : "#FFFFCD"
-                border.color: MusicApi.songSource == 0 ? "#4384F5" : MusicApi.songSource == 1 ? "#F54343" : MusicApi.songSource == 2 ? "#4DF543" : "#F5F543"
+                textColor: MusicApi.songSource == 0 ? "#0F3975" : MusicApi.songSource == 1 ? "#750F0F" : MusicApi.songSource == 2 ? "#7A1C3C" : MusicApi.songSource == 3 ? "#16750F" : "#756F0F"
+                color: MusicApi.songSource == 0 ? "#CDE8FF" : MusicApi.songSource == 1 ? "#FFCDCD" : MusicApi.songSource == 2 ? "#FFD9E6" : MusicApi.songSource == 3 ? "#CDFFCD" : "#FFFFCD"
+                border.color: MusicApi.songSource == 0 ? "#4384F5" : MusicApi.songSource == 1 ? "#F54343" : MusicApi.songSource == 2 ? "#FB7299" : MusicApi.songSource == 3 ? "#4DF543" : "#F5F543"
                 radius: 18
                 cardRadius: Style.settings.labelRadius
-                model: ["酷狗音乐","网易云音乐","QQ音乐(x)","自定义源(x)"]
+                model: ["酷狗音乐","网易云音乐","哔哩哔哩","QQ音乐(x)","自定义源(x)"]
                 onTransformed: (choiced) => {
                     MusicApi.songSource = choiced;
                     MusicApi.newSongs.clear();
@@ -410,13 +410,13 @@ Item {
                         width: 50
                         height: 20
                         radius: 10
-                        color: model.source === 0 ? "#CDE8FF" : "#FFCDCD"
+                        color: model.source === 0 ? "#CDE8FF" : model.source === 1 ? "#FFCDCD" : "#FFD9E6"
                         Text {
                             anchors.centerIn: parent
-                            text: model.source === 0 ? "酷狗" : "网易云"
+                            text: model.source === 0 ? "酷狗" : model.source === 1 ? "网易云" : "B站"
                             font.pixelSize: 11
                             font.weight: Font.DemiBold
-                            color: model.source === 0 ? "#0F3975" : "#750F0F"
+                            color: model.source === 0 ? "#0F3975" : model.source === 1 ? "#750F0F" : "#7A1C3C"
                         }
                     }
                     Text {

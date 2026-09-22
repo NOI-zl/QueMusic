@@ -1,4 +1,3 @@
-// QPicture.qml
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-2026 QueMusic Contributors
 //
@@ -22,32 +21,29 @@ Item {
     property alias picScale: mask.scale
     property size sourceSize: Qt.size(width,height)
 
-    // 原始图像，隐藏
     Image {
         id: sourceItem
         source: root.source
         anchors.fill: parent
         sourceSize: root.sourceSize
         cache: root.cache
+        asynchronous: true
         fillMode: Image.PreserveAspectCrop
         visible: false
         onStatusChanged: if(status === Image.Error) source = "qrc:/QueMusic/resources/app/musicpic.png";
     }
 
-    //
     MultiEffect {
         id: multiEffect
         source: sourceItem
         anchors.fill: sourceItem
         maskEnabled: true
         maskSource: mask
-        // 属性抗锯齿
+        // 边缘抗锯齿
         maskThresholdMin: 0.5
         maskSpreadAtMin: 1.0
-
     }
 
-    // 圆形黑色矩形（用于遮罩）
     Rectangle {
         id: mask
         width: root.width

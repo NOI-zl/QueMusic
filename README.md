@@ -13,7 +13,7 @@
   <img alt="Release" src="https://img.shields.io/github/v/release/BroNekoX/QueMusic?style=flat-square">
 </p>
 
-> **基于 Qt 6.10 / QML 与 GPU 加速 RHI 渲染的开源跨平台音乐播放器，支持接入网易云、酷狗等平台的公开音乐服务接口。**
+> **基于 Qt 6.10 / QML 与 GPU 加速 RHI 渲染的开源跨平台音乐播放器，拥有全能的体验，界面美观，性能高，动效丝滑，功能全面，支持在线音乐。**
 > 动效精致，开发者坚持 **永久免费 & 开源**。
 > 
 > 🚧 项目正处于 **开发/预览阶段**，部分功能尚未完善, 仍存在部分问题，有一些功能无法使用，会持续更新，欢迎 Star & Fork 一起参与！
@@ -23,7 +23,7 @@
 | 状态 | 功能 |
 |------|------|
 | ✅ 已完善 | 本地播放、本地歌词（.lrc / 内嵌 SYLT & USLT）、沉浸式歌词页、主题与界面自定义、收藏、播放历史、A-B 循环、睡眠定时、Windows SMTC 媒体控件 |
-| 🚧 开发中 | 在线搜索与播放（酷狗 / 网易云公开接口）、歌单管理、下载管理、桌面歌词、桌面小窗播放器、均衡器与播放器选项 |
+| 🚧 开发中 | 在线搜索与播放（酷狗 / 网易云 / 哔哩哔哩公开接口）、歌单管理、下载管理、桌面歌词、桌面小窗播放器、均衡器与播放器选项 |
 | ❌ 暂不支持 | 投屏（AirPlay 类功能）、账号登录与云同步、移动端 |
 
 国内快速下载本应用及历史版本：
@@ -70,26 +70,6 @@
 
 ---
 
-## ✨ 核心特性
-
-| 维度 | 亮点 |
-|------|------|
-| **🎶 多平台音乐** | 支持登录网易云、酷狗等平台公开接口接入（仅访问公开内容，详见[免责声明](#免责声明)） |
-| **⚡ 性能** | C++ 核心模块 + QML RHI 场景渲染（Qt 6 默认 GPU 渲染管线），核显 / 老旧 CPU 可流畅运行 |
-| **🎨 精美 UI** | 高级毛玻璃圆角卡片、可自定义主题色 & 界面样式，自研 Theme / 配色系统 |
-| **🔄 流畅动画** | 自定义贝塞尔曲线动画，歌词界面丝滑 |
-| **📦 功能丰富** | 歌词滚动 / 桌面歌词、均衡器、歌单管理、搜索推荐、收藏同步 |
-| **🛡️ 可靠性** | 自制 JS API 管理层，统一错误处理，持续优化 |
-| **💻 跨平台** | 支持 **Windows / macOS / Linux** 桌面端（Beta 阶段以 Windows / Linux 为主） |
-
-### 本地歌词加载
-
-本地歌曲按以下顺序读取歌词：同目录同名 `.lrc` → 音频内嵌歌词 → 在线匹配 → “纯音乐，请欣赏”占位。
-内嵌歌词支持 ID3v2 的同步歌词（SYLT）与非同步歌词（USLT），以及 TagLib 能识别的
-`LYRICS` 文本元数据（常见于 FLAC、Ogg/Opus、MP4/M4A 等格式）。
-
----
-
 ## 🖼️ 截图预览
 
 > 项目正处于 **开发/预览阶段**，下面直接放效果（演示的歌曲仅供参考）
@@ -107,6 +87,85 @@
 
 ---
 
+## 🔨 快速了解
+
+### QueMusic 是什么？
+
+QueMusic是一款基于C++/QtQuick/QML 开发的高性能跨平台音乐播放器，具有丰富的功能，极高的性能，美丽的外观，丝滑的动画，支持Windows/MacOS/Linux 三桌面端。
+QueMusic将性能与界面丝滑度做出极致，以高性能的效果呈现更好的音乐体验。
+
+### QueMusic 拥有哪些特色？
+
+- 性能高，基于C++，QtRHI渲染，在正常使用中性能优于几乎所有Chromium内核的音乐播放器，拒绝使用浏览器内核。
+- UI动效强，借助QML的强大动画引擎，使用几乎丝滑稳定。
+- 界面美丽，自定义ShaderEffect着色器，使用QtRHI直接与系统渲染引擎连接，效果出色。
+- 功能丰富，本地音乐功能，各种自定义功能，在线音乐功能都算做的比较好（虽然没有做完）。
+
+---
+
+## ✨ 核心特性
+
+QueMusic 将每个细节做到极致，做全能的音乐播放器
+
+| 维度 | 亮点 |
+|------|------|
+| **🎶 多平台音乐** | 支持登录网易云、酷狗等平台公开接口接入（仅访问公开内容，详见[免责声明](#免责声明)） |
+| **⚡ 性能** | C++ 核心模块 + QML RHI 场景渲染（Qt 6 默认 GPU 渲染管线），核显 / 老旧 CPU 可流畅运行 |
+| **🎨 精美 UI** | 高级毛玻璃圆角卡片、可自定义主题色 & 界面样式，自研 Theme / 配色系统 |
+| **🔄 流畅动画** | 自定义贝塞尔曲线动画，歌词界面丝滑 |
+| **📦 功能丰富** | 歌词滚动 / 桌面歌词、均衡器、歌单管理、搜索推荐、收藏同步 |
+| **🛡️ 可靠性** | 自制 JS API 管理层，统一错误处理，持续优化 |
+| **💻 跨平台** | 支持 **Windows / macOS / Linux** 桌面端（Beta 阶段以 Windows / Linux 为主） |
+
+### Que Graph UI
+
+QueMusic拥有流畅美丽的UI，这得益于优秀的Qt RHI与QML Scene Graph引擎，同时QueMusic基于它们做出极致的UI优化，保证即使在核显中，GPU占用也非常低
+
+#### 精简的QML Components架构
+
+不仅底层的QML Scene Graph和Qt RHI渲染性能优秀，更得益于QueMusic优秀的架构设计，拒绝屎山架构喵，保证渲染不会卡顿，渲染时长在核显中平均一帧仅2ms，这还得是组件设计，保证组件不爆炸，在组件设计之中；
+
+- 尽量用少嵌套，而不是Item套一个Item，保证低重复渲染率
+- 在组件定位上，越简单越好：x/y/width/height > anchors > Row/Column > Layouts
+- 高效的绑定，用更少的计算绑定
+
+#### 自定义渲染
+
+在模糊卡片的背景效果与歌词界面的上下渐进模糊，都使用了Shaders自定义着色器而不是堆Effects
+
+如：模糊卡片在之前使用ShaderEffectSource（之前没有在不显示时关闭Live，导致不必要的多余渲染）然后推到MultiEffect，使用Qt的模糊与饱和度修改算法，以及另外定义一个圆角卡片将要模糊的背景源遮罩到该卡片，这样渲染相对是繁重的喵，因此在新版本中，自定义着色器直接实现了，ShaderEffectSource>模糊处理>饱和度拉高>圆角渲染，并使用高效模糊算法，同时解决ShaderEffectSource之前额外截取源的开销，可参考项目/shaders/cardblur(_hq).frag.同时歌词界面上下也使用自定义着色器，实现上下的淡入淡出与渐进模糊效果。
+
+### Que Audio Engine
+
+QueMusic 音频引擎使用基于FFmpeg的自研架构，将音频链路自我掌管，自由调节音频效果。
+
+### Que NetMedia Engine
+
+QueMusic 在线媒体引擎
+
+### Que Plugins Engine
+
+QueMusic 插件引擎
+
+### 本地歌词加载
+
+本地歌曲按以下顺序读取歌词：同目录同名 `.lrc` → 音频内嵌歌词 → 在线匹配 → “纯音乐，请欣赏”占位。
+内嵌歌词支持 ID3v2 的同步歌词（SYLT）与非同步歌词（USLT），以及 TagLib 能识别的
+`LYRICS` 文本元数据（常见于 FLAC、Ogg/Opus、MP4/M4A 等格式）。
+
+### QueMusic性能实测
+
+i5-12400+UHD730核显环境，在1080P/60FPS歌词界面下：CPU平均占用4%，GPU平均占用15%，完全丝滑流畅稳定60FPS。
+
+#### 得益于QueMusic在几方面做出的性能努力：
+
+- 1. 复杂的数据处理，计算任务都在C++进行，并且放到工作线程防止卡顿主界面。
+- 2. 完善的AOT编译优化，即使是UI层的JavaScript代码，全部采用规范类型限定，这使得在QmlCachegen下拥有更好的编译前缓存优化，大量JavaScript代码能够自动编译为C++或二进制代码，大幅提升性能
+- 3. 轻量的QML Component组件框架，拒绝大量嵌套，手搓高效率框架逻辑，动态加载页面和布局，自定义整个组件库，这使得QtRHI在渲染QML界面时速度更快，内存占用更低
+- 4. 一个负责的开发者喵，正在努力优化QueMusic，让性能变得更好
+
+---
+
 ## 🛠️ 技术栈
 
 | 类别 | 技术 |
@@ -114,7 +173,7 @@
 | **框架** | Qt 6.10.3 Community |
 | **构建** | CMake ≥ 3.24 / Ninja |
 | **语言** | C++17 / JavaScript / QML |
-| **音频** | Qt Multimedia (FFmpeg7.1.1 后端) |
+| **音频** | FFmpeg解码 + 自研DSP音频处理工具 |
 | **渲染** | QtRHI — 基于平台原生GPU渲染器 |
 | **数据库** | Qt SQL / SQLite |
 | **工具链** | MSVC 2022 / GCC 13+ / MinGW 13+ / LLVM-MinGW 17+ |
@@ -128,6 +187,11 @@
 - Qt **6.10+**（含 Qt Multimedia, Qt SQL, Qt ShaderTools等基础Qt库）
 - CMake ≥ **3.24**
 - 编译器：GCC 13+ / MinGW 13+ / LLVM-MinGW 17+ / Clang
+- **FFmpeg 开发库**（音频后端的解码层，在项目ffmpeg文件夹中）：
+  - Windows：`powershell -ExecutionPolicy Bypass -File cmake/fetch_ffmpeg.ps1`（解压到仓库根的 `ffmpeg/`，该目录已在 `.gitignore` 中）
+  - Linux：`sudo apt install libavcodec-dev libavformat-dev libavutil-dev libswresample-dev pkg-config`
+  - Arch：`sudo pacman -S ffmpeg pkgconf`
+  - 也可以 `-DQUEMUSIC_FFMPEG_ROOT=<ffmpeg prefix>` 指定已有安装
 - （可选）**Ninja** 构建系统（推荐，已内置在预设中）
 
 ### 克隆（含子模块）
@@ -137,7 +201,7 @@ git clone --recurse-submodules https://github.com/BroNekoX/QueMusic.git
 cd QueMusic
 ```
 
-> ⚠️ **重要**：本项目使用 QWindowKit、TagLib 作为 git 子模块，务必加上 `--recurse-submodules`。
+> ⚠️ **重要**：本项目使用 QWindowKit、TagLib、Cryptopp 作为 git 子模块，务必加上 `--recurse-submodules`。
 > 如果已经 clone 但忘记拉子模块，运行：
 > 
 > ```bash
@@ -241,6 +305,7 @@ QueMusic/
 ├── main.qml                    # QML 主入口
 ├── SettingsView.qml            # 设置布局页面
 ├── cpp/                        # C++ 后端模块
+│   ├── audio/                  # 音频后端：AudioEngine / FfmpegDecoder / AudioDsp / TimeStretch
 │   ├── CoverHelper.cpp/h       # 封面图片处理
 │   ├── ColorExtractor.cpp/h    # 颜色提取（自适应主题色）
 │   ├── GetWave.cpp/h           # 音频波形数据
@@ -254,6 +319,7 @@ QueMusic/
 │   ├── MusicApiService.cpp/h   # 在线音乐 API总部
 │   ├── KugouApi.cpp/h          # 酷狗音乐 API
 │   ├── NeteaseApi.cpp/h        # 网易云音乐 API
+│   ├── BilibiliApi.cpp/h       # 哔哩哔哩音乐 API
 │   └── OnlinelistModel.cpp/h   # 在线api的列表模型自定义组件
 ├── components/                 # QML 组件库（自研 UI 库）
 │   ├── Q***.qml                # 各自控件，QueMusic由它们组成
@@ -366,7 +432,6 @@ Copyright (c) 2025-2026 QueMusic Contributors
 
 ---
 
-
 ## 📢 免责声明
 
 ### 1. 音乐版权
@@ -434,6 +499,5 @@ QueMusic 官方版本始终保持开源与永久免费，没有任何Pro、Ultra
 
 <p align="center">
   <sub>Written for QueMusic Project</sub><br/>
-  <sub>最后更新：2026-9-16</sub>
+  <sub>最后更新：2026-9-21</sub>
 </p>
-

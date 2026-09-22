@@ -16,6 +16,7 @@
 
 #include "KugouApi.h"
 #include "NeteaseCloudApi.h"   // 基于 QCloudMusicApi 的网易云实现（替代旧 NeteaseApi）
+#include "BilibiliApi.h"
 #include "OnlineListModel.h"
 #include "../cpp/DownloadManager.h"
 
@@ -171,6 +172,9 @@ public:
     Q_INVOKABLE void findLocalLyrics(const QString &filePath, const QString &title,
                                      const QString &artist, int duration = 0,
                                      int source = -1);
+    // B 站稿件没有字幕时，复用上面的在线搜词链路（默认回退到酷狗）补全歌词
+    void findOnlineLyrics(const QString &title, const QString &artist, int duration,
+                          int source = 0);
 
 signals:
     void loaded();   // loadState 置 true（QLoadSign 显示加载动画）
@@ -208,7 +212,7 @@ private:
     void loadQualityCache();
     void scheduleSaveQualityCache();
     void saveQualityCache();
-    void syncCookie(int source);   // 同步 AccountManager 登录态 Cookie
+    void syncSource(int source);   // 同步各平台请求所需的登录态 / 音质设置
     QVariantMap normalizeItem(const QVariantMap &raw); // 字段归一化 + 旧字段别名
     QVariantList normalizeList(const QVariant &v);
     void handleMusicInfo(const QVariantMap &d, int source);
@@ -235,6 +239,7 @@ private:
     QTimer m_altsSaveTimer;
     NeteaseCloudApi m_netease;   // 网易云（源 1）：基于 QCloudMusicApi（weapi 加密协议）
     KugouApi m_kugou;
+    BilibiliApi m_bilibili;      // 哔哩哔哩（源 2）：音乐区稿件 + DASH 音频流
     AccountManager *m_account = nullptr;
     static AccountManager *s_accountManager; // create() 使用，main.cpp 注入
 
@@ -260,6 +265,15 @@ private:
     QMap<QString, QVariantMap> m_pendingDownloads;
     QMap<int, LocalLyricsRequest> m_localLyricsSearches;
     QMap<QString, LocalLyricsRequest> m_pendingLocalLyrics;
+    // 当前请求的 B 站稿件；没有字幕时用它复用在线搜词链路
+    struct OnlineTrack {
+        QString hash;
+        QString title;
+        QString artist;
+        int duration = 0;
+    };
+    OnlineTrack m_biliTrack;
+    QMap<int, LocalLyricsRequest> m_biliFallbackSearches;
 
     bool m_loadState = false;
     QVariant m_globalid;

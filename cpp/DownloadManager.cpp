@@ -273,6 +273,14 @@ void DownloadManager::startNextTask()
     // 发起网络请求
     QNetworkRequest request;
     request.setUrl(QUrl(task.url));
+    // B 站 CDN 会校验 Referer / UA，缺失时返回 403
+    if (task.url.contains(QLatin1String("bilivideo"), Qt::CaseInsensitive)
+        || task.url.contains(QLatin1String("bilibili"), Qt::CaseInsensitive)) {
+        request.setRawHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                           "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                           "Chrome/120.0.0.0 Safari/537.36");
+        request.setRawHeader("Referer", "https://www.bilibili.com");
+    }
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::NoLessSafeRedirectPolicy);
     m_reply = m_manager->get(request);

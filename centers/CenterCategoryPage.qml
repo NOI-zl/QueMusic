@@ -86,7 +86,7 @@ Item {
                 visible: page.categoryTab === 1
                 source: MusicApi.toplistList
                 cardWidth: 148
-                badgeOf: m => m.source === 1 ? "网易云" : "酷狗"
+                badgeOf: m => m.source === 0 ? "酷狗" : m.source === 1 ? "网易云" : "B站"
                 onPicked: i => {
                     const d = MusicApi.toplistList.get(i)
                     page.showDetail(d.title || "榜单", d.cover)

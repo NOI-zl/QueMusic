@@ -23,12 +23,8 @@ Settings {
 
     //播放器
     property int soundQuality: 1 //音质
-    property int equalizer: 0 //均衡器 0.默认 1.自定义
     property bool useDefaultDevice: true //默认输出设备
     property int audioDevice: 0 //输出设备
-    property int sampleRate: 2 //对应不同质量如44100 96000
-    property int depth: 1 //位深
-    property int bufferSize: 2 //缓冲大小
     property bool autoPlay: true
     property int playerRateIndex: 2 //倍速预设
     property int volumeStep: 5 //音量步长(%)

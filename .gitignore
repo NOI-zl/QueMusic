@@ -70,5 +70,9 @@ node_modules/
 __pycache__/
 *.pyc
 
-# --- External binary dependencies (user-provided) ---
-ffmpeg/
+# --- FFmpeg 开发文件随仓库提供 ---
+# 不再整体忽略该目录：include/lib/bin 与许可证一并入库，构建时无需联网下载。
+# 下面的例外必须在上面 "*.dll" / "*.a" 规则之后（git 忽略规则的顺序敏感）。
+!ffmpeg/bin/*.dll
+!ffmpeg/lib/*.dll.a
+

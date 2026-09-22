@@ -187,12 +187,13 @@ LocalLyricsReader::Parsed LocalLyricsReader::parseLrcWithTranslation(const QStri
     static const QRegularExpression timestamp(
         QStringLiteral(R"(\[(\d{1,3}):(\d{2})(?:\.(\d{1,3}))?\])"));
 
+    static const QRegularExpression lineBreak(QStringLiteral("[\\r\\n]"));
+
     QList<RawLine> raw;
     const QString normalized = contents.startsWith(QChar(0xFEFF))
                                    ? contents.mid(1)
                                    : contents;
-    const QStringList lines = normalized.split(QRegularExpression(QStringLiteral("[\\r\\n]")),
-                                               Qt::KeepEmptyParts);
+    const QStringList lines = normalized.split(lineBreak, Qt::KeepEmptyParts);
 
     for (const QString &line : lines) {
         QRegularExpressionMatchIterator matches = timestamp.globalMatch(line);

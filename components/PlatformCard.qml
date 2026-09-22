@@ -11,8 +11,10 @@ Rectangle {
     property color chooseColor1: Style.themes.containColor
     property bool choose: false
     property bool isLogin: false
+    property bool showLogin: true
     property string name: ""
     property string header: ""
+    property string idleText: "未绑定账户"
     property string text: "Music"
     color: choose ? chooseColor1 : Style.themes.secondaryColor
     border.color: choose ? chooseColor : Style.themes.sideColor
@@ -35,6 +37,7 @@ Rectangle {
         QButton {
             x: root.width - width - 16
             y: 80
+            visible: root.showLogin
             text: root.isLogin ? "退出登录" : "扫码登录"
             height: 32
             radius: 16
@@ -76,7 +79,7 @@ Rectangle {
         }
         Text {
             height: 32
-            text: root.isLogin ? root.name : "未绑定账户"
+            text: root.isLogin ? root.name : root.idleText
             color: root.isLogin ? Style.themes.fontColor : Style.themes.textColor
             font.pixelSize: Style.settings.textmain
             verticalAlignment: Text.AlignVCenter

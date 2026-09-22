@@ -1,10 +1,8 @@
-// QBlurCard.qml
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-2026 QueMusic Contributors
 //
-// 卡片实时背景模糊：抓取指定区域，单 frag 完成模糊 + 饱和度 + 圆角。
+// 卡片实时背景模糊：抓取指定区域，单 frag 完成模糊 + 饱和度 + 圆角
 import QtQuick
-import QtQuick.Window
 import QueMusic 1.0
 import QtQuick.Effects
 

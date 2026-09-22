@@ -90,7 +90,6 @@ Window {
         border.width: 2
         border.color: Style.themes.sideColor
 
-        // 封面
         Image {
             x: 16
             y: 16
@@ -98,6 +97,7 @@ Window {
             height: 64
             source: mainMedia.urlStr || "qrc:/QueMusic/resources/app/musicpic.png"
             sourceSize: Qt.size(128, 128)
+            asynchronous: true
             fillMode: Image.PreserveAspectCrop
         }
 
@@ -108,7 +108,7 @@ Window {
             y: 16
             width: playerCard.width - 102 - 48
             height: 22
-            text: window.musicTitle
+            text: Playback.musicTitle
             elide: Text.ElideRight
             font.bold: true
             font.pixelSize: 14
@@ -123,7 +123,7 @@ Window {
             y: 38
             width: playerCard.width - 102 - 48
             height: 18
-            text: window.musicArtist
+            text: Playback.musicArtist
             elide: Text.ElideRight
             font.pixelSize: 12
             verticalAlignment: Text.AlignVCenter
@@ -216,7 +216,7 @@ Window {
                 hoverColor: Style.themes.hoverColor
                 iconColor: Style.themes.textColor
                 shadowEnabled: false
-                onClicked: musicControlMin.lastMedia()
+                onClicked: Playback.previous()
                 tipText: "上一首"
             }
             SButton {
@@ -244,7 +244,7 @@ Window {
                 hoverColor: Style.themes.hoverColor
                 iconColor: Style.themes.textColor
                 shadowEnabled: false
-                onClicked: musicControlMin.enterMedia()
+                onClicked: Playback.next(false)
                 tipText: "下一首"
             }
             SButton {
@@ -287,7 +287,6 @@ Window {
             shadowEnabled: false
             onClicked: {
                 desktopPlayer.desktopPlayerMode = 0;
-                desktopSpot.active = false;
                 desktopPlayerLoader.active = false;
             }
 

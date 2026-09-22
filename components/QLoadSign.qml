@@ -71,6 +71,6 @@ Item {
         width: root.width - 12
         height: root.height - 12
         source: "qrc:/QueMusic/resources/loader.gif"
-        playing: true
+        playing: root.visible
     }
 }

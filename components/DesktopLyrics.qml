@@ -1,4 +1,3 @@
-// DesktopLyricsWindow.qml
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 QueMusic Contributors
 //
@@ -166,7 +165,7 @@ Window {
             y: 12
             height: 36
             width: desktopLyricsWindow.width / 2 - 80
-            text: window.musicTitle + " - " + window.musicArtist
+            text: Playback.musicTitle + " - " + Playback.musicArtist
             verticalAlignment: Text.AlignVCenter
             color: "#fffafafa"
             font.pixelSize: Style.settings.text
@@ -205,7 +204,7 @@ Window {
                     hoverColor: "#66fafafa"
                     iconColor: "#fffdfdfd"
                     shadowEnabled: false
-                    onClicked: musicControlMin.lastMedia()
+                    onClicked: Playback.previous()
                     QTip { visible: parent.hovered; text: "上一首" }
                 }
 
@@ -231,7 +230,7 @@ Window {
                     hoverColor: "#66fafafa"
                     iconColor: "#fffdfdfd"
                     shadowEnabled: false
-                    onClicked: musicControlMin.enterMedia()
+                    onClicked: Playback.next(false)
                     QTip { visible: parent.hovered; text: "下一首" }
                 }
             }
