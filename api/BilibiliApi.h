@@ -11,6 +11,7 @@
 
 #include <QHash>
 #include <QList>
+#include <QNetworkReply> // Callback / 失败上报需要 QNetworkReply::NetworkError 枚举
 #include <QObject>
 #include <QString>
 #include <QVariant>
@@ -54,16 +55,28 @@ public:
     void getPersonalRadar(int page, int pageSize);
 
 signals:
-    // 统一结果协议：data 为 { info: [...] }（列表）或单条信息 map
+    // 统一结果协议：data 为 { info: [...] }（列表）或单条信息 map；
+    // 请求失败时 data 里额外带 "error"（int，QNetworkReply::NetworkError 值），且 info 为空，
+    // 上层据此区分“请求失败”与“接口正常返回空数据”。
     void resultReady(const QString &action, const QVariant &data, int source);
 
 private:
-    using Callback = std::function<void(const QJsonObject &)>;
+    // 回调携带明确的结果状态：只有 HTTP 2xx 且 JSON 可解析时才是 NoError，
+    // 其余情况 obj 为空对象、error 为真实失败原因（解析失败 → ProtocolFailure）
+    using Callback = std::function<void(const QJsonObject &, QNetworkReply::NetworkError)>;
     using Task = std::function<void()>;
+    // 密钥链等待者：参数为密钥链结果，NoError 表示成功
+    using KeyWaiter = std::function<void(QNetworkReply::NetworkError)>;
 
     void get(const QString &url, const Callback &cb);                       // GET + JSON 回调
     void getSigned(const QString &path, QVariantMap params, const Callback &cb); // WBI 签名 GET
-    void ensureKeys(const Task &then);                                      // 懒加载 WBI 密钥与 buvid
+    // 懒加载 WBI 密钥与 buvid：成功 → 执行 then；失败 → 不执行 then，改执行 onFail（可为空）。
+    // 语义：失败时不会“静默抽干”等待队列——已排队的任务一律丢弃，由 onFail 把 error 上报上层，
+    // 否则上层既拿不到结果、loadState 也无法复位。
+    void ensureKeys(const Task &then, const KeyWaiter &onFail = KeyWaiter());
+    void emitError(const QString &action, QNetworkReply::NetworkError error,
+                   const QVariantMap &extra = QVariantMap()); // 失败上报（data 带 error 字段）
+    void emitLyricError(const QString &hash, QNetworkReply::NetworkError error); // 歌词失败上报
     void searchVideos(const QString &keyword, int tid, int page, const QString &action);
     void ranking(int rid, int page, int pageSize, const QString &action);   // rid=3 音乐区排行
     void newVideos(int page, int pageSize, const QString &action);          // 音乐区最新投稿
@@ -81,7 +94,7 @@ private:
     QString m_loginCookie;
     int m_quality = 1;
     bool m_keyRequesting = false;
-    QList<Task> m_keyWaiters;
+    QList<KeyWaiter> m_keyWaiters;
     QHash<QString, QString> m_upNames; // UP 主 mid → 昵称（歌手歌曲检索需要）
 };
 

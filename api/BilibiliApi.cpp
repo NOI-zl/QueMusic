@@ -80,9 +80,29 @@ int durationSeconds(const QJsonValue &v)
     return total;
 }
 
+// 下载文件名扩展名：DASH 音频流固定是 m4a；
+// durl 回退是音视频合流，容器可能是 mp4 / flv 等，故优先取 URL 路径里的扩展名，
+// 不在白名单内的（含路径里偶然出现的点号）一律退回默认值。
+QString mediaSuffix(const QString &url, bool durlFallback)
+{
+    if (!durlFallback)
+        return QStringLiteral("m4a");
+    const QString suffix =
+        QUrl(url).path().section(QLatin1Char('.'), -1).toLower();
+    static const QSet<QString> kKnownContainers = {
+        QStringLiteral("m4a"), QStringLiteral("mp4"), QStringLiteral("m4s"),
+        QStringLiteral("flv"), QStringLiteral("aac"), QStringLiteral("mp3"),
+        QStringLiteral("ts"),  QStringLiteral("mov"), QStringLiteral("mkv"),
+        QStringLiteral("webm"),
+    };
+    return kKnownContainers.contains(suffix) ? suffix : QStringLiteral("mp4");
+}
+
 // 目标音质对应的 B 站音频 id：30216 标准 / 30280 高清 / 30251 Hi-Res
 QJsonObject pickAudio(const QJsonArray &audios, int quality)
 {
+    if (audios.isEmpty()) // 无音频流时返回空对象，调用方按“无可用地址”处理
+        return QJsonObject();
     const int target = quality >= 2 ? 30251 : (quality == 1 ? 30280 : 30216);
     QJsonObject best = audios.first().toObject();
     int bestScore = INT_MAX;
@@ -132,54 +152,128 @@ void BilibiliApi::get(const QString &url, const Callback &cb)
 
     QNetworkReply *reply = m_nam->get(req);
     connect(reply, &QNetworkReply::finished, this, [reply, cb] {
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError)
-            qWarning() << "[bilibili] 请求失败:" << reply->errorString()
+        const QByteArray body = reply->readAll();
+        // 非 2xx 统一用 UnknownContentError 表达“响应内容不可用”（HTTP 头本身就是错误信息，
+        // 正文多为 HTML 错误页）：Qt 对 HTTP 错误通常已给出对应错误码，
+        // 但本地代理 / 重定向场景下 reply->error() 可能仍是 NoError。
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        QNetworkReply::NetworkError error = reply->error();
+        QJsonObject obj;
+        if (error != QNetworkReply::NoError) {
+            qWarning() << "[bilibili] 请求失败:" << error << reply->errorString()
                        << reply->url().toString();
-        // 失败也回调，保证上层 loadState 能复位
-        cb(QJsonDocument::fromJson(reply->readAll()).object());
+        } else if (status > 0 && (status < 200 || status >= 300)) {
+            qWarning() << "[bilibili] HTTP 状态异常:" << status << reply->url().toString();
+            error = QNetworkReply::UnknownContentError;
+        } else {
+            // JSON 不可解析同样算失败：否则损坏的响应会被上层当成“接口正常返回空数据”
+            QJsonParseError parseError{};
+            const QJsonDocument doc = QJsonDocument::fromJson(body, &parseError);
+            if (parseError.error != QJsonParseError::NoError) {
+                qWarning() << "[bilibili] 响应解析失败:" << parseError.errorString()
+                           << reply->url().toString();
+                error = QNetworkReply::ProtocolFailure;
+            } else {
+                obj = doc.object();
+            }
+        }
+        reply->deleteLater();
+        // 失败时照样回调（obj 为空、error 为真实原因），保证上层 loadState 能复位
+        cb(obj, error);
     });
 }
 
-void BilibiliApi::ensureKeys(const Task &then)
+void BilibiliApi::ensureKeys(const Task &then, const KeyWaiter &onFail)
 {
     if (!m_mixinKey.isEmpty() && !m_buvid3.isEmpty()) {
         then();
         return;
     }
     if (m_keyRequesting) {
-        m_keyWaiters.append(then);
+        // 排队等待：成功才执行 then，失败交给 onFail（不再静默抽干队列）
+        m_keyWaiters.append([then, onFail](QNetworkReply::NetworkError error) {
+            if (error == QNetworkReply::NoError) {
+                if (then)
+                    then();
+            } else if (onFail) {
+                onFail(error);
+            }
+        });
         return;
     }
     m_keyRequesting = true;
+
+    // 密钥链任一环节失败：复位状态、清空密钥、丢弃等待队列（排队的请求一律不发），
+    // 并逐个通知失败，让上层能发出带 error 的空结果而不是无声无息。
+    const auto failAll = [this](QNetworkReply::NetworkError error) {
+        m_keyRequesting = false;
+        m_mixinKey.clear();
+        m_buvid3.clear();
+        m_buvid4.clear();
+        const QList<KeyWaiter> waiters = m_keyWaiters;
+        m_keyWaiters.clear();
+        if (!waiters.isEmpty())
+            qWarning() << "[bilibili] 密钥获取失败，丢弃等待中的请求:" << waiters.size()
+                       << error;
+        for (const KeyWaiter &w : waiters)
+            w(error);
+    };
+
     get(QStringLiteral("https://api.bilibili.com/x/web-interface/nav"),
-        [this](const QJsonObject &j) {
+        [this, failAll](const QJsonObject &j, QNetworkReply::NetworkError error) {
+            if (error != QNetworkReply::NoError) {
+                qWarning() << "[bilibili] WBI 密钥请求失败:" << error;
+                failAll(error);
+                return;
+            }
             const QJsonObject img = j.value(QStringLiteral("data")).toObject()
                                         .value(QStringLiteral("wbi_img")).toObject();
             const auto baseName = [](const QString &u) {
                 return u.section(QLatin1Char('/'), -1).section(QLatin1Char('.'), 0, 0);
             };
-            m_mixinKey = mixinKey(baseName(img.value(QStringLiteral("img_url")).toString()),
-                                  baseName(img.value(QStringLiteral("sub_url")).toString()));
+            const QString key = mixinKey(baseName(img.value(QStringLiteral("img_url")).toString()),
+                                         baseName(img.value(QStringLiteral("sub_url")).toString()));
+            if (key.isEmpty()) { // 响应正常但没有可用的 img_key/sub_key：按内容错误处理
+                qWarning() << "[bilibili] WBI 密钥响应缺少 img_key/sub_key";
+                failAll(QNetworkReply::UnknownContentError);
+                return;
+            }
+            m_mixinKey = key;
             get(QStringLiteral("https://api.bilibili.com/x/frontend/finger/spi"),
-                [this](const QJsonObject &j2) {
+                [this, failAll](const QJsonObject &j2, QNetworkReply::NetworkError error2) {
+                    if (error2 != QNetworkReply::NoError) {
+                        qWarning() << "[bilibili] buvid 请求失败:" << error2;
+                        failAll(error2);
+                        return;
+                    }
                     const QJsonObject d = j2.value(QStringLiteral("data")).toObject();
                     m_buvid3 = d.value(QStringLiteral("b_3")).toString();
                     m_buvid4 = d.value(QStringLiteral("b_4")).toString();
+                    if (m_buvid3.isEmpty()) { // 没有指纹时后续搜索会被风控拦截，视为失败
+                        qWarning() << "[bilibili] buvid 响应缺少 b_3";
+                        failAll(QNetworkReply::UnknownContentError);
+                        return;
+                    }
                     m_keyRequesting = false;
-                    const QList<Task> waiters = m_keyWaiters;
+                    const QList<KeyWaiter> waiters = m_keyWaiters;
                     m_keyWaiters.clear();
-                    for (const Task &t : waiters)
-                        t();
+                    for (const KeyWaiter &w : waiters)
+                        w(QNetworkReply::NoError);
                 });
         });
 }
 
 void BilibiliApi::getSigned(const QString &path, QVariantMap params, const Callback &cb)
 {
+    // 密钥链失败：不排队、直接以空对象 + 错误码回调，调用方会把它转成带 error 的空结果
+    const KeyWaiter onFail = [cb](QNetworkReply::NetworkError error) {
+        if (cb)
+            cb(QJsonObject(), error);
+    };
     ensureKeys([this, path, params, cb]() mutable {
-        if (m_mixinKey.isEmpty()) { // 密钥获取失败：直接回调空结果
-            cb(QJsonObject());
+        if (m_mixinKey.isEmpty()) { // 理论上不会走到（ensureKeys 已拦截），仍按失败处理
+            if (cb)
+                cb(QJsonObject(), QNetworkReply::UnknownContentError);
             return;
         }
         params.insert(QStringLiteral("wts"),
@@ -200,7 +294,7 @@ void BilibiliApi::getSigned(const QString &path, QVariantMap params, const Callb
         get(kApi + path + QLatin1Char('?') + query + QStringLiteral("&w_rid=")
                 + QString::fromLatin1(sign),
             cb);
-    });
+    }, onFail);
 }
 
 QVariantMap BilibiliApi::toSong(const QJsonObject &v)
@@ -239,6 +333,28 @@ void BilibiliApi::emitLyrics(const QString &hash, const QVariantList &lyrics)
     emit resultReady(QStringLiteral("getLyricInfo"), data, Source);
 }
 
+// 失败上报：发出“空但结构完整”的 payload（沿用列表协议 { info: [] }），
+// 并附加 "error" 字段（int，QNetworkReply::NetworkError 值），
+// 让上层能区分“请求失败”和“接口正常返回空数据”；extra 用于补上 action 自身的必需字段。
+void BilibiliApi::emitError(const QString &action, QNetworkReply::NetworkError error,
+                            const QVariantMap &extra)
+{
+    QVariantMap data = ApiCommon::listResult({});
+    for (auto it = extra.constBegin(); it != extra.constEnd(); ++it)
+        data.insert(it.key(), it.value());
+    data.insert(QStringLiteral("error"), int(error));
+    emit resultReady(action, data, Source);
+}
+
+// 歌词协议要求带 hash / translate，失败时同样要带上（未写完的字段见 emitError）
+void BilibiliApi::emitLyricError(const QString &hash, QNetworkReply::NetworkError error)
+{
+    QVariantMap extra;
+    extra.insert(QStringLiteral("translate"), QVariantList());
+    extra.insert(QStringLiteral("hash"), hash);
+    emitError(QStringLiteral("getLyricInfo"), error, extra);
+}
+
 void BilibiliApi::searchVideos(const QString &keyword, int tid, int page, const QString &action)
 {
     if (keyword.trimmed().isEmpty()) {
@@ -251,7 +367,11 @@ void BilibiliApi::searchVideos(const QString &keyword, int tid, int page, const 
     params.insert(QStringLiteral("page"), page);
     params.insert(QStringLiteral("tids"), tid);
     getSigned(QStringLiteral("/x/web-interface/wbi/search/type"), params,
-              [this, action](const QJsonObject &j) {
+              [this, action](const QJsonObject &j, QNetworkReply::NetworkError error) {
+                  if (error != QNetworkReply::NoError) { // 失败：上报 error，不发空列表
+                      emitError(action, error);
+                      return;
+                  }
                   QVariantList info;
                   for (const QJsonValue &v : j.value(QStringLiteral("data")).toObject()
                                                  .value(QStringLiteral("result")).toArray())
@@ -263,7 +383,11 @@ void BilibiliApi::searchVideos(const QString &keyword, int tid, int page, const 
 void BilibiliApi::ranking(int rid, int page, int pageSize, const QString &action)
 {
     get(kApi + QStringLiteral("/x/web-interface/ranking/v2?rid=%1&type=all").arg(rid),
-        [this, page, pageSize, action](const QJsonObject &j) {
+        [this, page, pageSize, action](const QJsonObject &j, QNetworkReply::NetworkError error) {
+            if (error != QNetworkReply::NoError) {
+                emitError(action, error);
+                return;
+            }
             const QJsonArray arr = j.value(QStringLiteral("data")).toObject()
                                        .value(QStringLiteral("list")).toArray();
             const int offset = (qMax(page, 1) - 1) * qMax(pageSize, 1);
@@ -279,7 +403,11 @@ void BilibiliApi::newVideos(int page, int pageSize, const QString &action)
     get(kApi + QStringLiteral("/x/web-interface/newlist?rid=3&type=0&pn=%1&ps=%2")
               .arg(qMax(page, 1))
               .arg(qMax(pageSize, 1)),
-        [this, action](const QJsonObject &j) {
+        [this, action](const QJsonObject &j, QNetworkReply::NetworkError error) {
+            if (error != QNetworkReply::NoError) {
+                emitError(action, error);
+                return;
+            }
             QVariantList info;
             for (const QJsonValue &v : j.value(QStringLiteral("data")).toObject()
                                            .value(QStringLiteral("archives")).toArray())
@@ -291,7 +419,11 @@ void BilibiliApi::newVideos(int page, int pageSize, const QString &action)
 void BilibiliApi::rankingUsers(const QString &action, int limit)
 {
     get(kApi + QStringLiteral("/x/web-interface/ranking/v2?rid=3&type=all"),
-        [this, action, limit](const QJsonObject &j) {
+        [this, action, limit](const QJsonObject &j, QNetworkReply::NetworkError error) {
+            if (error != QNetworkReply::NoError) {
+                emitError(action, error);
+                return;
+            }
             QVariantList info;
             QSet<QString> seen;
             for (const QJsonValue &v : j.value(QStringLiteral("data")).toObject()
@@ -364,7 +496,11 @@ void BilibiliApi::getPlaylistSongs(const QString &listid, int page, int pageSize
         return;
     }
     get(kApi + QStringLiteral("/x/web-interface/view?bvid=") + listid,
-        [this](const QJsonObject &j) {
+        [this](const QJsonObject &j, QNetworkReply::NetworkError error) {
+            if (error != QNetworkReply::NoError) {
+                emitError(QStringLiteral("getPlaylistSongs"), error);
+                return;
+            }
             const QJsonObject d = j.value(QStringLiteral("data")).toObject();
             QVariantList info;
             if (!d.isEmpty())
@@ -430,7 +566,6 @@ void BilibiliApi::getSingerCategory(int area, int page, int pageSize)
 // 歌手 = UP 主：按昵称搜索其音乐区投稿，再按 mid 过滤
 void BilibiliApi::getSingerSongs(const QString &singerid, int page, int pageSize)
 {
-    Q_UNUSED(pageSize);
     const QString name = m_upNames.value(singerid);
     if (name.isEmpty()) {
         emitList(QStringLiteral("getSingerSongs"), {});
@@ -441,8 +576,15 @@ void BilibiliApi::getSingerSongs(const QString &singerid, int page, int pageSize
     params.insert(QStringLiteral("keyword"), name);
     params.insert(QStringLiteral("page"), page);
     params.insert(QStringLiteral("tids"), 3);
+    // L2: 该搜索接口支持 page_size（实测 50 → 返回 50 条；≥60 会被服务端以 -400 拒绝，
+    // 所以统一夹到 [1,50]），与 newVideos 的 ps 参数等价，避免调用方的页大小被静默忽略。
+    params.insert(QStringLiteral("page_size"), qBound(1, pageSize, 50));
     getSigned(QStringLiteral("/x/web-interface/wbi/search/type"), params,
-              [this, singerid](const QJsonObject &j) {
+              [this, singerid](const QJsonObject &j, QNetworkReply::NetworkError error) {
+                  if (error != QNetworkReply::NoError) {
+                      emitError(QStringLiteral("getSingerSongs"), error);
+                      return;
+                  }
                   QVariantList info;
                   for (const QJsonValue &v : j.value(QStringLiteral("data")).toObject()
                                                  .value(QStringLiteral("result")).toArray()) {
@@ -468,10 +610,19 @@ void BilibiliApi::getMusicInfo(const QString &hash, int type)
     }
 
     get(kApi + QStringLiteral("/x/web-interface/view?bvid=") + hash,
-        [this, hash, type](const QJsonObject &j) {
+        [this, hash, type](const QJsonObject &j, QNetworkReply::NetworkError error) {
+            if (error != QNetworkReply::NoError) {
+                qWarning() << "[bilibili] 稿件详情请求失败:" << error << hash;
+                QVariantMap extra;
+                extra.insert(QStringLiteral("hash"), hash);
+                extra.insert(QStringLiteral("type"), type);
+                extra.insert(QStringLiteral("errReason"), QStringLiteral("unavailable"));
+                emitError(QStringLiteral("getMusicInfo"), error, extra);
+                return;
+            }
             const QJsonObject d = j.value(QStringLiteral("data")).toObject();
             const QString cid = d.value(QStringLiteral("cid")).toVariant().toString();
-            if (cid.isEmpty()) {
+            if (cid.isEmpty()) { // 请求成功但没有 cid：属于“合法空数据”，不带 error
                 QVariantMap data;
                 data.insert(QStringLiteral("hash"), hash);
                 data.insert(QStringLiteral("type"), type);
@@ -482,7 +633,16 @@ void BilibiliApi::getMusicInfo(const QString &hash, int type)
 
             get(kApi + QStringLiteral("/x/player/playurl?bvid=%1&cid=%2&fnval=16&fourk=1")
                           .arg(hash, cid),
-                [this, hash, type, d](const QJsonObject &pj) {
+                [this, hash, type, d](const QJsonObject &pj, QNetworkReply::NetworkError error2) {
+                    if (error2 != QNetworkReply::NoError) {
+                        qWarning() << "[bilibili] 播放地址请求失败:" << error2 << hash;
+                        QVariantMap extra;
+                        extra.insert(QStringLiteral("hash"), hash);
+                        extra.insert(QStringLiteral("type"), type);
+                        extra.insert(QStringLiteral("errReason"), QStringLiteral("unavailable"));
+                        emitError(QStringLiteral("getMusicInfo"), error2, extra);
+                        return;
+                    }
                     const QJsonObject pd = pj.value(QStringLiteral("data")).toObject();
                     const QJsonArray audios = pd.value(QStringLiteral("dash")).toObject()
                                                   .value(QStringLiteral("audio")).toArray();
@@ -493,11 +653,14 @@ void BilibiliApi::getMusicInfo(const QString &hash, int type)
                         if (url.isEmpty())
                             url = httpsUrl(best.value(QStringLiteral("base_url")).toString());
                     }
+                    bool durlFallback = false;
                     if (url.isEmpty()) { // 少数稿件只有 durl（音视频合流）
                         const QJsonArray durl = pd.value(QStringLiteral("durl")).toArray();
-                        if (!durl.isEmpty())
+                        if (!durl.isEmpty()) {
                             url = httpsUrl(durl.first().toObject()
                                                .value(QStringLiteral("url")).toString());
+                            durlFallback = !url.isEmpty();
+                        }
                     }
 
                     const QJsonObject owner = d.value(QStringLiteral("owner")).toObject();
@@ -514,8 +677,10 @@ void BilibiliApi::getMusicInfo(const QString &hash, int type)
                                 httpsUrl(d.value(QStringLiteral("pic")).toString()));
                     data.insert(QStringLiteral("timeLength"),
                                 d.value(QStringLiteral("duration")).toInt());
+                    // L1: DASH 音频流固定 m4a；durl 回退是合流容器（可能 mp4/flv），
+                    // 扩展名按 URL 推断，推断不出时退回默认值，避免扩展名与实际容器不符。
                     data.insert(QStringLiteral("fileName"),
-                                title + QStringLiteral(".m4a"));
+                                title + QLatin1Char('.') + mediaSuffix(url, durlFallback));
                     data.insert(QStringLiteral("hash"), hash);
                     data.insert(QStringLiteral("type"), type);
                     if (url.isEmpty())
@@ -535,16 +700,26 @@ void BilibiliApi::getLyricInfo(const QString &hash, int duration)
         return;
     }
     get(kApi + QStringLiteral("/x/web-interface/view?bvid=") + hash,
-        [this, hash](const QJsonObject &j) {
+        [this, hash](const QJsonObject &j, QNetworkReply::NetworkError error) {
+            if (error != QNetworkReply::NoError) {
+                qWarning() << "[bilibili] 歌词稿件详情请求失败:" << error << hash;
+                emitLyricError(hash, error);
+                return;
+            }
             const QJsonObject d = j.value(QStringLiteral("data")).toObject();
             const QString cid = d.value(QStringLiteral("cid")).toVariant().toString();
-            if (cid.isEmpty()) {
+            if (cid.isEmpty()) { // 请求成功但没有 cid：合法空数据，交给上层补词
                 emitLyrics(hash, {});
                 return;
             }
 
             get(kApi + QStringLiteral("/x/player/v2?bvid=%1&cid=%2").arg(hash, cid),
-                [this, hash](const QJsonObject &pj) {
+                [this, hash](const QJsonObject &pj, QNetworkReply::NetworkError error2) {
+                    if (error2 != QNetworkReply::NoError) {
+                        qWarning() << "[bilibili] 字幕信息请求失败:" << error2 << hash;
+                        emitLyricError(hash, error2);
+                        return;
+                    }
                     const QJsonArray subs = pj.value(QStringLiteral("data")).toObject()
                                                 .value(QStringLiteral("subtitle")).toObject()
                                                 .value(QStringLiteral("subtitles")).toArray();
@@ -557,11 +732,17 @@ void BilibiliApi::getLyricInfo(const QString &hash, int duration)
                             break;
                         }
                     }
-                    if (subUrl.isEmpty()) {
+                    if (subUrl.isEmpty()) { // 稿件确实没有字幕：合法空数据
                         emitLyrics(hash, {});
                         return;
                     }
-                    get(subUrl, [this, hash](const QJsonObject &sj) {
+                    get(subUrl, [this, hash](const QJsonObject &sj,
+                                             QNetworkReply::NetworkError error3) {
+                        if (error3 != QNetworkReply::NoError) {
+                            qWarning() << "[bilibili] 字幕文件请求失败:" << error3 << hash;
+                            emitLyricError(hash, error3);
+                            return;
+                        }
                         QVariantList lyrics;
                         for (const QJsonValue &v : sj.value(QStringLiteral("body")).toArray()) {
                             const QJsonObject l = v.toObject();

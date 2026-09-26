@@ -15,7 +15,10 @@ Rectangle {
     clip: false
     property int musicInfoX: 100
 
-    readonly property string mediaTime: Playback.fmt(mainMedia.position)
+    // 宿主注入：播放引擎不再靠上下文继承访问宿主的局部 id
+    readonly property AudioEngine player: Playback.player
+
+    readonly property string mediaTime: Playback.fmt(player.position)
     Connections {
         target: playListModel
         function onPlayListIndexChanged(): void {
@@ -60,7 +63,7 @@ Rectangle {
     //控制条
     Item {
         id: sliderControl
-        visible: mainMedia.onMedia
+        visible: player.onMedia
         x: 0
         y: -10
         z: 6
@@ -89,15 +92,15 @@ Rectangle {
             anchors.fill: parent
             width: musicControlMin.width
             from: 0
-            to: mainMedia.duration > 0 ? mainMedia.duration : 1 // 避免除零错误
-            value: pressed ? null : mainMedia.position
+            to: player.duration > 0 ? player.duration : 1 // 避免除零错误
+            value: pressed ? null : player.position
             live: true
             padding: 0
 
 
             // 关键：用户拖动时，跳转播放位置
             onMoved: {
-                mainMedia.position = value
+                player.position = value
             }
 
             // 背景轨道
@@ -278,7 +281,7 @@ Rectangle {
                         mainWarn.tiped("取消收藏",0);
                         iconColor = Style.themes.textColor;
                     } else {
-                        FavoriteSongs.addFavorite(playListModel.get(playListModel.playListIndex).path, Playback.musicTitle, Playback.musicArtist, mainMedia.urlStr, playListModel.get(playListModel.playListIndex).source, Math.floor(mainMedia.duration / 1000), "song");
+                        FavoriteSongs.addFavorite(playListModel.get(playListModel.playListIndex).path, Playback.musicTitle, Playback.musicArtist, player.urlStr, playListModel.get(playListModel.playListIndex).source, Math.floor(player.duration / 1000), "song");
                         mainWarn.tiped("成功收藏",1);
                         iconColor = Style.themes.themeColor;
                     }
@@ -351,7 +354,7 @@ Rectangle {
             tipText: "上一首"
         }
         SButton {
-            iconCharacter: mainMedia.playing ? "\uf02f" : "\uf00e"
+            iconCharacter: player.playing ? "\uf02f" : "\uf00e"
             width: 46
             height: 46
             radius: 46
@@ -361,7 +364,7 @@ Rectangle {
             iconSize: Style.settings.texticonH
             shadowEnabled: false
             onClicked: Playback.togglePlay()
-            tipText: mainMedia.playing ? "暂停" : "播放"
+            tipText: player.playing ? "暂停" : "播放"
         }
         SButton {
             iconCharacter: "\uf0d9"
@@ -405,7 +408,7 @@ Rectangle {
         Label {
             height: 40
             width: 80
-            text: musicControlMin.mediaTime + " / " + Playback.fmt(mainMedia.duration)
+            text: musicControlMin.mediaTime + " / " + Playback.fmt(player.duration)
             font.bold: false
             font.pixelSize: 14
             verticalAlignment: Text.AlignVCenter
@@ -536,8 +539,8 @@ Rectangle {
             likeButton.iconColor = Style.themes.textColor;
             mainWarn.tiped("取消收藏", 0);
         } else {
-            FavoriteSongs.addFavorite(e.path, Playback.musicTitle, Playback.musicArtist, mainMedia.urlStr,
-                                      e.source, Math.floor(mainMedia.duration / 1000), "song");
+            FavoriteSongs.addFavorite(e.path, Playback.musicTitle, Playback.musicArtist, player.urlStr,
+                                      e.source, Math.floor(player.duration / 1000), "song");
             likeButton.iconColor = Style.themes.themeColor;
             mainWarn.tiped("成功收藏", 1);
         }

@@ -365,3 +365,17 @@ target_link_libraries(quemusic_audio_pipeline_test PRIVATE
     quemusic::ffmpeg
 )
 add_test(NAME quemusic_audio_pipeline_test COMMAND quemusic_audio_pipeline_test)
+
+add_executable(quemusic_queue_model_test
+    tests/queue_model_test.cpp
+    cpp/QueueModel.cpp
+)
+target_include_directories(quemusic_queue_model_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpp
+)
+target_link_libraries(quemusic_queue_model_test PRIVATE
+    Qt6::Core
+    Qt6::Qml
+    Qt6::Test
+)
+add_test(NAME quemusic_queue_model_test COMMAND quemusic_queue_model_test)

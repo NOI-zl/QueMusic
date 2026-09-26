@@ -17,6 +17,9 @@ constexpr int kMaxPushFrames = 8192;
 // 构造 / 析构
 GetWave::GetWave(QObject *parent) : QObject(parent)
 {
+    // 句柄先于一切回调建立：音频线程只持有它，从不直接引用 this
+    m_handle = std::make_shared<AudioSpectrumSinkHandle>(this);
+
     m_spectrumData.reserve(m_bands);
     for (int i = 0; i < m_bands; ++i)
         m_spectrumData.append(0.0);
@@ -69,6 +72,24 @@ void GetWave::setEngine(AudioEngine *engine)
     if (m_engine)
         m_engine->setSpectrumSink(this);
     emit engineChanged();
+}
+
+std::shared_ptr<AudioSpectrumSinkHandle> GetWave::spectrumSinkHandle()
+{
+    return m_handle;
+}
+
+GetWave::~GetWave()
+{
+    // 顺序很重要：detach() 会等到音频线程退出本对象后才返回，
+    // 之后析构 m_visMutex / 环缓冲 / 频谱数组才不会被音频线程踩到
+    if (m_handle)
+        m_handle->detach();
+    // 主动退订，不依赖 QObject::destroyed —— 那个信号发出时派生类成员已经析构
+    if (m_engine)
+        m_engine->setSpectrumSink(nullptr);
+    if (m_renderWindow && m_frameConnection)
+        disconnect(m_frameConnection);
 }
 
 // QML 读取频谱
