@@ -27,7 +27,11 @@ Window {
     minimumWidth: 1020
     minimumHeight: 640
     color: "#06060a"
-    visible: true
+    // 初始不可见：由 enter() 决定显示方式，避免 Loader 一加载就在屏幕上闪一个窗口
+    visible: false
+
+    // 关闭流程走完后通知宿主，由宿主同步 Loader / 顶部按钮状态
+    signal closed()
 
     // 复用项目组件（QListView 等）依赖 Style.themes 配色，
     // 沉浸背景恒为深色，故打开期间固定深色主题，关闭时还原
@@ -47,14 +51,17 @@ Window {
         requestActivate()
     }
     function exit(): void {
-        if (visibility === Window.FullScreen)
+        // 先退出全屏/最大化再隐藏：全屏下调 showNormal() 只是回到窗口模式，
+        // 不 hide() 的话第一次点关闭看起来「关不掉」
+        if (visibility === Window.FullScreen || visibility === Window.Maximized)
             showNormal()
-        else
-            hide()
+        hide()
         if (savedTheme >= 0) {
             Style.settings.theme = savedTheme
             savedTheme = -1
         }
+        // 主题与窗口状态都恢复完，才通知宿主销毁本窗口
+        closed()
     }
     function toggleFull(): void {
         if (visibility === Window.FullScreen)
@@ -105,7 +112,10 @@ Window {
         return s !== "" ? s : "qrc:/QueMusic/resources/app/musicpic.png"
     }
     function validSource(s: var): var {
-        return s !== undefined && s !== null ? s : MusicApi.songSource
+        // 不写 s !== undefined：AOT 构建下项目对 undefined 比较有历史问题，
+        // 这里看类型 —— undefined / null 都会落到「用默认音源」
+        const t = typeof s
+        return (t === "number" || t === "string") ? s : MusicApi.songSource
     }
     function playOnline(d: var): void {
         if (!d)

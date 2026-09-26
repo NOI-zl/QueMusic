@@ -93,14 +93,21 @@ private slots:
     void trackSwitchStress();
     void pitchShiftKeepsDuration();
     void renderOnDedicatedThread();
+    void spectrumSinkLifetime();
     void reconfigureWhilePlaying();
     void dspThroughput();
 };
 
 // 记录音频渲染实际落在哪个线程
-class ThreadProbeSink : public QObject, public AudioSpectrumSink
+// 订阅走共享句柄：析构前 detach()，音频线程不可能再进入本对象
+class ThreadProbeSink : public QObject, public AudioSpectrumSink, public AudioSpectrumSource
 {
 public:
+    ThreadProbeSink() : m_handle(std::make_shared<AudioSpectrumSinkHandle>(this)) {}
+    ~ThreadProbeSink() override { m_handle->detach(); }
+
+    std::shared_ptr<AudioSpectrumSinkHandle> spectrumSinkHandle() override { return m_handle; }
+
     std::atomic<int> calls{0};
     QThread *thread = nullptr;
 
@@ -109,6 +116,9 @@ public:
         thread = QThread::currentThread();
         calls.fetch_add(1, std::memory_order_release);
     }
+
+private:
+    std::shared_ptr<AudioSpectrumSinkHandle> m_handle;
 };
 
 void AudioPipelineTest::decodeAndSeek()
@@ -482,6 +492,39 @@ void AudioPipelineTest::renderOnDedicatedThread()
     QVERIFY2(sink.thread != QThread::currentThread(),
              "音频渲染仍在 GUI 线程上执行，GUI 卡顿会直接导致断音");
 
+    engine.setSpectrumSink(nullptr);
+    engine.stop();
+}
+
+// 播放中反复销毁订阅者：旧实现里音频线程会拿着已销毁的 GetWave*，
+// 这里让订阅者「在仍被订阅的状态下」析构，验证句柄的 detach() 兜住了这个窗口
+void AudioPipelineTest::spectrumSinkLifetime()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = QDir(dir.path()).filePath("lifetime.wav");
+    writeWav(path, 48000, 2, 5.0);
+
+    AudioEngine engine;
+    engine.setVolume(0.0);
+    engine.setSource(QUrl::fromLocalFile(path));
+    QTRY_VERIFY_WITH_TIMEOUT(engine.mediaStatus() == AudioEngine::LoadedMedia, 5000);
+    engine.play();
+
+    int observed = 0;
+    for (int i = 0; i < 8; ++i) {
+        // 作用域结束即析构，且不做退订：这是最容易踩悬空指针的路径
+        ThreadProbeSink sink;
+        engine.setSpectrumSink(&sink);
+        QTRY_VERIFY_WITH_TIMEOUT(sink.calls.load(std::memory_order_acquire) > 0, 3000);
+        observed += sink.calls.load(std::memory_order_acquire);
+    }
+    QVERIFY2(observed > 0, "频谱回调从未到达订阅者");
+
+    // 换回普通订阅、再显式退订，走完整条切换路径
+    ThreadProbeSink tail;
+    engine.setSpectrumSink(&tail);
+    QTRY_VERIFY_WITH_TIMEOUT(tail.calls.load(std::memory_order_acquire) > 0, 3000);
     engine.setSpectrumSink(nullptr);
     engine.stop();
 }

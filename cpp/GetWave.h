@@ -10,18 +10,20 @@
 
 #include <QAtomicInteger>
 #include <QObject>
+#include <QPointer>
 #include <QVector>
 #include <QImage>
 #include <QtMath>
 #include <algorithm>
 #include <complex>
+#include <memory>
 #include <vector>
 #include <QtQmlIntegration/qqmlintegration.h>
 #include <QtQuick/QQuickWindow>
 
 using Complex = std::complex<float>;
 
-class GetWave : public QObject, public AudioSpectrumSink
+class GetWave : public QObject, public AudioSpectrumSink, public AudioSpectrumSource
 {
     Q_OBJECT
     QML_ELEMENT
@@ -34,11 +36,15 @@ class GetWave : public QObject, public AudioSpectrumSink
 
 public:
     explicit GetWave(QObject *parent = nullptr);
+    ~GetWave() override;
 
-    AudioEngine* engine() const { return m_engine; }
+    AudioEngine* engine() const { return m_engine.data(); }
     void setEngine(AudioEngine *engine);
 
-    // AudioSpectrumSink：由音频回调线程直接调用
+    // AudioSpectrumSource：把可跨线程安全使用的句柄交给引擎，引擎不认识本类型
+    std::shared_ptr<AudioSpectrumSinkHandle> spectrumSinkHandle() override;
+
+    // AudioSpectrumSink：只由句柄在持锁状态下转发，音频线程从不直接持有 this
     void pushSamples(const float *interleaved, int frames, int channels, int sampleRate) override;
 
     QList<qreal> spectrumData() const;
@@ -69,7 +75,10 @@ private:
 
     void computeSpectrumFromFFT(const float *samples, int frames, float sampleRate);
 
-    AudioEngine        *m_engine = nullptr;
+    // QPointer：引擎可能先于本对象销毁，析构时不能再解引用裸指针
+    QPointer<AudioEngine> m_engine;
+    // 与引擎共享的订阅句柄；析构时先 detach() 再让成员析构，音频线程才碰不到已销毁对象
+    std::shared_ptr<AudioSpectrumSinkHandle> m_handle;
 
     QList<qreal>        m_spectrumData;
     QVector<QPointF>    m_wavePath;

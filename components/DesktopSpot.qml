@@ -17,6 +17,9 @@ Window {
     transientParent: null
     flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
     readonly property int animeDuration: Style.settings.spotSpeed === 0 ? 160 : Style.settings.spotSpeed === 2 ? 480 : 320
+
+    // 宿主注入：播放引擎不再靠上下文继承访问宿主的局部 id
+    readonly property AudioEngine player: Playback.player
     Rectangle {
         id: spotCard
         y: 0
@@ -91,7 +94,7 @@ Window {
             id: spotPlayButton
             y: spotCard.height - 40
             z: 3
-            iconCharacter: mainMedia.playing ? "\uf02f" : "\uf00e"
+            iconCharacter: player.playing ? "\uf02f" : "\uf00e"
             width: 32
             height: 32
             radius: 16
@@ -119,10 +122,10 @@ Window {
                 width: parent.width
                 height: 16
                 from: 0
-                to: mainMedia.duration > 0 ? mainMedia.duration : 1
-                value: pressed ? null : mainMedia.position
+                to: player.duration > 0 ? player.duration : 1
+                value: pressed ? null : player.position
                 live: true
-                onMoved: mainMedia.position = value
+                onMoved: player.position = value
                 padding: 0
                 background: Rectangle {
                     y: (seekSlider.height - 4) / 2

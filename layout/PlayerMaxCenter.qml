@@ -11,6 +11,9 @@ import 'qrc:/QueMusic/components'
 
 Item {
     id: musicControlMax
+
+    // 宿主注入：播放引擎不再靠上下文继承访问宿主的局部 id
+    readonly property AudioEngine player: Playback.player
     readonly property int standHeight: Style.settings.lyricSize + mainLayout.height / 32 + mainLayout.width / 56
     readonly property int infoWidth: lyricModeText.width / 2
     property bool basicCd: false
@@ -75,7 +78,7 @@ Item {
 
     MeshGradientItem {
         anchors.fill: parent
-        coverUrl: mainMedia.urlStr || "qrc:/QueMusic/resources/app/musicpic.png"
+        coverUrl: player.urlStr || "qrc:/QueMusic/resources/app/musicpic.png"
         color1: musicControlMax.mainColor
         color2: musicControlMax.secondColor
         color3: musicControlMax.thirdColor
@@ -258,8 +261,8 @@ Item {
             height: mainLayout.piclong
             y: (musicControlMax.height - height) * 0.5
             x: controlMaxLoader.infoX
-            rotation: mainMedia.playing
-            source: mainMedia.urlStr || "qrc:/QueMusic/resources/app/musicpic.png"
+            rotation: player.playing
+            source: player.urlStr || "qrc:/QueMusic/resources/app/musicpic.png"
         }
     }
 
@@ -283,7 +286,7 @@ Item {
             fragmentShader: "qrc:/shaders/shaders/lyricfade.frag.qsb"
         }
 
-        property int currentPlayTime: mainMedia.position + lyricMove
+        property int currentPlayTime: player.position + lyricMove
         property int lyricMove: 0
         readonly property int lyricHeight: musicControlMax.standHeight / 2
         property real alignPos: 0.32        // 当前行停在视口高度比例
@@ -326,7 +329,7 @@ Item {
 
         Timer {
             interval: 320
-            running: mainMedia.onMedia
+            running: player.onMedia
             repeat: true
             onTriggered: {
                 const data = MusicApi.lyricsData;
@@ -368,16 +371,18 @@ Item {
                     fixedAnime.running = true;
                 }
                 const currentLineData = MusicApi.lyricsData[idx];
-                const currentInfo = currentLineData ? currentLineData.info : undefined;
+                const currentInfo = currentLineData ? currentLineData.info : null;
                 if (currentInfo && currentInfo.length > 0 && idx + 1 < MusicApi.lyricsData.length) {
                     const lyricLastLineData = currentInfo[currentInfo.length - 1];
                     const nextLineData = MusicApi.lyricsData[idx + 1];
+                    // 不写 !== undefined：AOT 构建下项目对 undefined 比较有历史问题，
+                    // 这几个字段本来就该是数字，直接判类型
                     if (lyricLastLineData && nextLineData
-                        && (lyricLastLineData.offset !== undefined)
-                        && (lyricLastLineData.duration !== undefined)
-                        && (nextLineData.time !== undefined)
-                        && (currentLineData.time !== undefined)) {
-                        if (nextLineData.time - currentLineData.time - lyricLastLineData.offset - lyricLastLineData.duration > 2500 && mainMedia.position > currentLineData.time + lyricLastLineData.offset + lyricLastLineData.duration) {
+                        && typeof lyricLastLineData.offset === "number"
+                        && typeof lyricLastLineData.duration === "number"
+                        && typeof nextLineData.time === "number"
+                        && typeof currentLineData.time === "number") {
+                        if (nextLineData.time - currentLineData.time - lyricLastLineData.offset - lyricLastLineData.duration > 2500 && player.position > currentLineData.time + lyricLastLineData.offset + lyricLastLineData.duration) {
                             if(!waitAnimeSection.visible) {
                                 console.log("开始运行等待动画。");
                                 waitOpenAnime.running = false;
@@ -596,7 +601,7 @@ Item {
                             }
                             LinearGradient {
                                 property int countToWidth: lyricItem.nowPosition > linesText.model[index].offset && lyricItem.isFlowActive ? width + 16 : 0
-                                Behavior on countToWidth { NumberAnimation { Component.onCompleted: duration = linesText.model[index].duration / mainMedia.playbackRate * (width + 16) / width } }
+                                Behavior on countToWidth { NumberAnimation { Component.onCompleted: duration = linesText.model[index].duration / player.playbackRate * (width + 16) / width } }
                                 width: parent.width
                                 height: parent.height
                                 y: lyricFlowText.y
@@ -674,7 +679,7 @@ Item {
                 NumberAnimation { target: waitAnimeSection; property: "opacity"; from: 0; to: 1; duration: 460; easing.type: Easing.OutCubic }
                 NumberAnimation { target: waitAnimeSection; property: "scale"; from: 0; to: 1; duration: 460; easing.type: Easing.OutCubic }
             }
-            NumberAnimation { target: waitAnimeSection; property: "lightState"; from: 0; to: 3; duration: waitOpenAnime.lightDuration / mainMedia.playbackRate }
+            NumberAnimation { target: waitAnimeSection; property: "lightState"; from: 0; to: 3; duration: waitOpenAnime.lightDuration / player.playbackRate }
         }
         ParallelAnimation {
             id: waitOutAnime
